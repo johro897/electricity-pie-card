@@ -4,6 +4,8 @@ A lightweight, custom Home Assistant card that visualizes your electricity consu
 
 Unlike many other custom cards, this card requires no external dependencies (like ApexCharts). Instead, it renders everything using efficient, native SVG graphics and fetches history data directly through the Home Assistant History API.
 
+![](screenshots/overview_pie_card.png)
+
 ## Features
 
 * **Period Breakdown:** Instantly see when during the day you consume the most energy.
