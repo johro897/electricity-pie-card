@@ -35,6 +35,14 @@ class ElectricityPieCard extends HTMLElement {
     this._initialized  = false;
     this._static       = false;
     this._lastState    = null;   // för live-uppdatering
+    this._reloadDebounce = null; // debounce-timer för live-uppdateringens omladdning
+  }
+
+  disconnectedCallback() {
+    if (this._reloadDebounce) {
+      clearTimeout(this._reloadDebounce);
+      this._reloadDebounce = null;
+    }
   }
 
   setConfig(config) {
@@ -73,7 +81,13 @@ class ElectricityPieCard extends HTMLElement {
       if (newState !== undefined && newState !== this._lastState) {
         this._lastState = newState;
         delete this._cache[this._localDateStr()]; // invalidera cache för idag
-        this._loadAndRender();
+        // Debounce: a sensor that updates every few seconds would otherwise
+        // trigger a fresh history/period/ fetch on every single tick.
+        if (this._reloadDebounce) clearTimeout(this._reloadDebounce);
+        this._reloadDebounce = setTimeout(() => {
+          this._reloadDebounce = null;
+          this._loadAndRender();
+        }, 2000);
       }
     }
   }
@@ -209,6 +223,26 @@ class ElectricityPieCard extends HTMLElement {
     }
   }
 
+  // ─── Escaping helpers ───────────────────────────────────────────────────────
+
+  _esc(str) {
+    if (str === undefined || str === null) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /** Only allow values that actually look like a CSS color through to a style/SVG attribute. */
+  _safeColor(color, fallback = "#888") {
+    const c = String(color ?? "").trim();
+    if (/^(#[0-9a-fA-F]{3,8}|rgba?\([^"'<>;]*\)|hsla?\([^"'<>;]*\)|var\(--[\w-]+(,\s*[^"'<>;]*)?\)|[a-zA-Z]+)$/.test(c)) {
+      return c;
+    }
+    return fallback;
+  }
+
   // ─── SVG pie ───────────────────────────────────────────────────────────────
 
   _buildPie(values, colors) {
@@ -227,7 +261,7 @@ class ElectricityPieCard extends HTMLElement {
     if (activeCount === 1) {
       const i = values.findIndex(v => v > 0);
       return `<circle cx="${cx}" cy="${cy}" r="${rMid}" fill="none"
-        stroke="${colors[i]}" stroke-width="${strokeW}" class="slice" data-index="${i}"/>`;
+        stroke="${this._safeColor(colors[i])}" stroke-width="${strokeW}" class="slice" data-index="${i}"/>`;
     }
 
     const gap = 0.045;
@@ -244,37 +278,19 @@ class ElectricityPieCard extends HTMLElement {
       const lg  = slice > Math.PI ? 1 : 0;
       const d   = `M${xi1} ${yi1} L${x1} ${y1} A${r} ${r} 0 ${lg} 1 ${x2} ${y2} L${xi2} ${yi2} A${ri} ${ri} 0 ${lg} 0 ${xi1} ${yi1}Z`;
       angle += slice + gap;
-      return `<path d="${d}" fill="${colors[i]}" class="slice" data-index="${i}"/>`;
+      return `<path d="${d}" fill="${this._safeColor(colors[i])}" class="slice" data-index="${i}"/>`;
     }).join("");
   }
 
   // ─── Main render ───────────────────────────────────────────────────────────
 
-  _render(values = [0, 0, 0], error = false, purged = false) {
-    const cfg = this._config;
-    if (!cfg) return;
-
-    const colors      = cfg.colors;
-    const labels      = ["00–08", "08–16", "16–24"];
-    const total       = values.reduce((a, b) => a + b, 0);
-    const pct         = (i) => total > 0 ? Math.round(values[i] / total * 100) : 0;
-    const dateStr     = this._selectedDate || this._localDateStr();
-    const displayDate = this._displayDate(dateStr);
-    const isToday     = dateStr === this._localDateStr();
-    const pieHTML     = this._buildPie(values, colors);
-
-    const legendRows = labels.map((l, i) => `
-      <div class="leg-row">
-        <span class="dot" style="background:${colors[i]}"></span>
-        <span class="leg-label">${l}</span>
-        <span class="leg-val">${this._loading ? "…" : values[i].toFixed(2)}</span>
-        <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
-      </div>`).join("");
-
+  /** Injects the static <style> + content container once — never touched again by _render(). */
+  _ensureShell() {
+    if (this.shadowRoot.getElementById("content")) return;
     this.shadowRoot.innerHTML = `
       <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :host { display: block; }
+        :host { display: block; container-type: inline-size; }
         ha-card { padding: 14px 16px 16px; background: var(--card-background-color, #fff); }
 
         .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }
@@ -316,6 +332,12 @@ class ElectricityPieCard extends HTMLElement {
         .leg-val { font-size: 12px; font-weight: 500; color: var(--primary-text-color); min-width: 48px; text-align: right; }
         .leg-pct { font-size: 11px; color: var(--disabled-text-color, rgba(0,0,0,.38)); min-width: 30px; text-align: right; }
 
+        /* Narrow card (e.g. sidebar panel): stack the pie above the legend instead of squeezing both side by side. */
+        @container (max-width: 260px) {
+          .chart-area { flex-direction: column; align-items: center; }
+          .legend { width: 100%; }
+        }
+
         .total-row {
           display: flex; justify-content: space-between; align-items: center;
           margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--divider-color, rgba(0,0,0,.08));
@@ -337,21 +359,47 @@ class ElectricityPieCard extends HTMLElement {
         .error-msg { font-size: 11px; color: var(--error-color, #f44336); text-align: center; padding: 4px 0; }
         .purge-warning { font-size: 10px; color: var(--warning-color, #ff9800); text-align: center; padding: 4px 0; margin-top: 6px; }
       </style>
+      <div id="content"></div>
+    `;
+  }
 
+  _render(values = [0, 0, 0], error = false, purged = false) {
+    const cfg = this._config;
+    if (!cfg) return;
+    this._ensureShell();
+
+    const colors      = cfg.colors;
+    const labels      = ["00–08", "08–16", "16–24"];
+    const total       = values.reduce((a, b) => a + b, 0);
+    const pct         = (i) => total > 0 ? Math.round(values[i] / total * 100) : 0;
+    const dateStr     = this._selectedDate || this._localDateStr();
+    const displayDate = this._displayDate(dateStr);
+    const isToday     = dateStr === this._localDateStr();
+    const pieHTML     = this._buildPie(values, colors);
+
+    const legendRows = labels.map((l, i) => `
+      <div class="leg-row">
+        <span class="dot" style="background:${colors[i]}"></span>
+        <span class="leg-label">${l}</span>
+        <span class="leg-val">${this._loading ? "…" : values[i].toFixed(2)}</span>
+        <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
+      </div>`).join("");
+
+    this.shadowRoot.getElementById("content").innerHTML = `
       <ha-card>
         <div class="header">
-          <span class="title">${cfg.title}</span>
+          <span class="title">${this._esc(cfg.title)}</span>
           ${this._static ? "" : `
             <div class="nav">
-              <button class="nav-btn" id="btn-back" title="Föregående dag" ${!this._canGoBack() ? "disabled" : ""}>
+              <button class="nav-btn" id="btn-back" title="Föregående dag" aria-label="Föregående dag" ${!this._canGoBack() ? "disabled" : ""}>
                 <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
-              <span class="date-label" id="date-label" title="Välj datum">${displayDate}</span>
+              <span class="date-label" id="date-label" title="Välj datum" role="button" tabindex="0" aria-label="Välj datum: ${displayDate}">${displayDate}</span>
               <input type="date" id="date-picker"
                 value="${dateStr}"
                 min="${this._offsetDate(this._localDateStr(), -cfg.max_days_back)}"
                 max="${this._localDateStr()}">
-              <button class="nav-btn" id="btn-fwd" title="Nästa dag" ${!this._canGoForward() ? "disabled" : ""}>
+              <button class="nav-btn" id="btn-fwd" title="Nästa dag" aria-label="Nästa dag" ${!this._canGoForward() ? "disabled" : ""}>
                 <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
             </div>
@@ -395,7 +443,11 @@ class ElectricityPieCard extends HTMLElement {
       });
       const dateLbl    = this.shadowRoot.getElementById("date-label");
       const datePicker = this.shadowRoot.getElementById("date-picker");
-      dateLbl?.addEventListener("click", () => datePicker?.showPicker?.() || datePicker?.click());
+      const openDatePicker = () => datePicker?.showPicker?.() || datePicker?.click();
+      dateLbl?.addEventListener("click", openDatePicker);
+      dateLbl?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDatePicker(); }
+      });
       datePicker?.addEventListener("change", (e) => {
         const val = e.target.value;
         this._selectedDate = val >= this._localDateStr() ? null : val;
