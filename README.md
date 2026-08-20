@@ -119,9 +119,18 @@ recorder:
 
 ## Changelog
 
-### v1.1
+### v1.3
 **Security hardening** — [#1](https://github.com/johro897/electricity-pie-card/issues/1)
 - The card title is now HTML-escaped, and configured `colors` values are now validated to actually look like a CSS color before being used — previously both were inserted into the card's markup as-is, so a crafted value in a shared/pasted dashboard YAML could break out of an attribute or inject markup
+
+**Performance** — [#2](https://github.com/johro897/electricity-pie-card/issues/2)
+- The static `<style>` block is now injected once instead of being reparsed on every render — regular renders now only replace the dynamic content, not the whole shadow DOM
+- Live updates (when the sensor's state changes while viewing today) are now debounced by 2 seconds instead of triggering an immediate history fetch on every single tick
+
+**Accessibility & responsive layout** — [#3](https://github.com/johro897/electricity-pie-card/issues/3)
+- The back/forward day-navigation buttons now have an `aria-label`, not just a `title`
+- The date label is now keyboard-operable — reachable via Tab, opens the date picker with Enter or Space
+- On a narrow card (e.g. a sidebar panel), the pie chart now stacks above the legend instead of squeezing both into a cramped side-by-side layout
 
 ### v1.0
 - Initial release
