@@ -290,7 +290,7 @@ class ElectricityPieCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :host { display: block; }
+        :host { display: block; container-type: inline-size; }
         ha-card { padding: 14px 16px 16px; background: var(--card-background-color, #fff); }
 
         .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }
@@ -331,6 +331,12 @@ class ElectricityPieCard extends HTMLElement {
         .leg-label { font-size: 12px; color: var(--secondary-text-color); flex: 1; }
         .leg-val { font-size: 12px; font-weight: 500; color: var(--primary-text-color); min-width: 48px; text-align: right; }
         .leg-pct { font-size: 11px; color: var(--disabled-text-color, rgba(0,0,0,.38)); min-width: 30px; text-align: right; }
+
+        /* Narrow card (e.g. sidebar panel): stack the pie above the legend instead of squeezing both side by side. */
+        @container (max-width: 260px) {
+          .chart-area { flex-direction: column; align-items: center; }
+          .legend { width: 100%; }
+        }
 
         .total-row {
           display: flex; justify-content: space-between; align-items: center;
@@ -385,15 +391,15 @@ class ElectricityPieCard extends HTMLElement {
           <span class="title">${this._esc(cfg.title)}</span>
           ${this._static ? "" : `
             <div class="nav">
-              <button class="nav-btn" id="btn-back" title="Föregående dag" ${!this._canGoBack() ? "disabled" : ""}>
+              <button class="nav-btn" id="btn-back" title="Föregående dag" aria-label="Föregående dag" ${!this._canGoBack() ? "disabled" : ""}>
                 <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
-              <span class="date-label" id="date-label" title="Välj datum">${displayDate}</span>
+              <span class="date-label" id="date-label" title="Välj datum" role="button" tabindex="0" aria-label="Välj datum: ${displayDate}">${displayDate}</span>
               <input type="date" id="date-picker"
                 value="${dateStr}"
                 min="${this._offsetDate(this._localDateStr(), -cfg.max_days_back)}"
                 max="${this._localDateStr()}">
-              <button class="nav-btn" id="btn-fwd" title="Nästa dag" ${!this._canGoForward() ? "disabled" : ""}>
+              <button class="nav-btn" id="btn-fwd" title="Nästa dag" aria-label="Nästa dag" ${!this._canGoForward() ? "disabled" : ""}>
                 <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
             </div>
@@ -437,7 +443,11 @@ class ElectricityPieCard extends HTMLElement {
       });
       const dateLbl    = this.shadowRoot.getElementById("date-label");
       const datePicker = this.shadowRoot.getElementById("date-picker");
-      dateLbl?.addEventListener("click", () => datePicker?.showPicker?.() || datePicker?.click());
+      const openDatePicker = () => datePicker?.showPicker?.() || datePicker?.click();
+      dateLbl?.addEventListener("click", openDatePicker);
+      dateLbl?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDatePicker(); }
+      });
       datePicker?.addEventListener("change", (e) => {
         const val = e.target.value;
         this._selectedDate = val >= this._localDateStr() ? null : val;
