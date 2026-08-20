@@ -119,6 +119,12 @@ recorder:
 
 ## Changelog
 
+### v1.3
+**Accessibility & responsive layout** — [#3](https://github.com/johro897/electricity-pie-card/issues/3)
+- The back/forward day-navigation buttons now have an `aria-label`, not just a `title`
+- The date label is now keyboard-operable — reachable via Tab, opens the date picker with Enter or Space
+- On a narrow card (e.g. a sidebar panel), the pie chart now stacks above the legend instead of squeezing both into a cramped side-by-side layout
+
 ### v1.0
 - Initial release
 - Donut pie chart with three 8-hour periods
