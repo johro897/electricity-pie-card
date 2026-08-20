@@ -209,6 +209,26 @@ class ElectricityPieCard extends HTMLElement {
     }
   }
 
+  // ─── Escaping helpers ───────────────────────────────────────────────────────
+
+  _esc(str) {
+    if (str === undefined || str === null) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /** Only allow values that actually look like a CSS color through to a style/SVG attribute. */
+  _safeColor(color, fallback = "#888") {
+    const c = String(color ?? "").trim();
+    if (/^(#[0-9a-fA-F]{3,8}|rgba?\([^"'<>;]*\)|hsla?\([^"'<>;]*\)|var\(--[\w-]+(,\s*[^"'<>;]*)?\)|[a-zA-Z]+)$/.test(c)) {
+      return c;
+    }
+    return fallback;
+  }
+
   // ─── SVG pie ───────────────────────────────────────────────────────────────
 
   _buildPie(values, colors) {
@@ -227,7 +247,7 @@ class ElectricityPieCard extends HTMLElement {
     if (activeCount === 1) {
       const i = values.findIndex(v => v > 0);
       return `<circle cx="${cx}" cy="${cy}" r="${rMid}" fill="none"
-        stroke="${colors[i]}" stroke-width="${strokeW}" class="slice" data-index="${i}"/>`;
+        stroke="${this._safeColor(colors[i])}" stroke-width="${strokeW}" class="slice" data-index="${i}"/>`;
     }
 
     const gap = 0.045;
@@ -244,7 +264,7 @@ class ElectricityPieCard extends HTMLElement {
       const lg  = slice > Math.PI ? 1 : 0;
       const d   = `M${xi1} ${yi1} L${x1} ${y1} A${r} ${r} 0 ${lg} 1 ${x2} ${y2} L${xi2} ${yi2} A${ri} ${ri} 0 ${lg} 0 ${xi1} ${yi1}Z`;
       angle += slice + gap;
-      return `<path d="${d}" fill="${colors[i]}" class="slice" data-index="${i}"/>`;
+      return `<path d="${d}" fill="${this._safeColor(colors[i])}" class="slice" data-index="${i}"/>`;
     }).join("");
   }
 
@@ -265,7 +285,7 @@ class ElectricityPieCard extends HTMLElement {
 
     const legendRows = labels.map((l, i) => `
       <div class="leg-row">
-        <span class="dot" style="background:${colors[i]}"></span>
+        <span class="dot" style="background:${this._safeColor(colors[i])}"></span>
         <span class="leg-label">${l}</span>
         <span class="leg-val">${this._loading ? "…" : values[i].toFixed(2)}</span>
         <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
@@ -340,7 +360,7 @@ class ElectricityPieCard extends HTMLElement {
 
       <ha-card>
         <div class="header">
-          <span class="title">${cfg.title}</span>
+          <span class="title">${this._esc(cfg.title)}</span>
           ${this._static ? "" : `
             <div class="nav">
               <button class="nav-btn" id="btn-back" title="Föregående dag" ${!this._canGoBack() ? "disabled" : ""}>

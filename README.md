@@ -119,6 +119,10 @@ recorder:
 
 ## Changelog
 
+### v1.1
+**Security hardening** — [#1](https://github.com/johro897/electricity-pie-card/issues/1)
+- The card title is now HTML-escaped, and configured `colors` values are now validated to actually look like a CSS color before being used — previously both were inserted into the card's markup as-is, so a crafted value in a shared/pasted dashboard YAML could break out of an attribute or inject markup
+
 ### v1.0
 - Initial release
 - Donut pie chart with three 8-hour periods
