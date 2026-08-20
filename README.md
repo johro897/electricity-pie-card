@@ -119,6 +119,11 @@ recorder:
 
 ## Changelog
 
+### v1.2
+**Performance** — [#2](https://github.com/johro897/electricity-pie-card/issues/2)
+- The static `<style>` block is now injected once instead of being reparsed on every render — regular renders now only replace the dynamic content, not the whole shadow DOM
+- Live updates (when the sensor's state changes while viewing today) are now debounced by 2 seconds instead of triggering an immediate history fetch on every single tick
+
 ### v1.0
 - Initial release
 - Donut pie chart with three 8-hour periods

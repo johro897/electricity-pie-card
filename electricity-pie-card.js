@@ -35,6 +35,14 @@ class ElectricityPieCard extends HTMLElement {
     this._initialized  = false;
     this._static       = false;
     this._lastState    = null;   // för live-uppdatering
+    this._reloadDebounce = null; // debounce-timer för live-uppdateringens omladdning
+  }
+
+  disconnectedCallback() {
+    if (this._reloadDebounce) {
+      clearTimeout(this._reloadDebounce);
+      this._reloadDebounce = null;
+    }
   }
 
   setConfig(config) {
@@ -73,7 +81,13 @@ class ElectricityPieCard extends HTMLElement {
       if (newState !== undefined && newState !== this._lastState) {
         this._lastState = newState;
         delete this._cache[this._localDateStr()]; // invalidera cache för idag
-        this._loadAndRender();
+        // Debounce: a sensor that updates every few seconds would otherwise
+        // trigger a fresh history/period/ fetch on every single tick.
+        if (this._reloadDebounce) clearTimeout(this._reloadDebounce);
+        this._reloadDebounce = setTimeout(() => {
+          this._reloadDebounce = null;
+          this._loadAndRender();
+        }, 2000);
       }
     }
   }
@@ -250,27 +264,9 @@ class ElectricityPieCard extends HTMLElement {
 
   // ─── Main render ───────────────────────────────────────────────────────────
 
-  _render(values = [0, 0, 0], error = false, purged = false) {
-    const cfg = this._config;
-    if (!cfg) return;
-
-    const colors      = cfg.colors;
-    const labels      = ["00–08", "08–16", "16–24"];
-    const total       = values.reduce((a, b) => a + b, 0);
-    const pct         = (i) => total > 0 ? Math.round(values[i] / total * 100) : 0;
-    const dateStr     = this._selectedDate || this._localDateStr();
-    const displayDate = this._displayDate(dateStr);
-    const isToday     = dateStr === this._localDateStr();
-    const pieHTML     = this._buildPie(values, colors);
-
-    const legendRows = labels.map((l, i) => `
-      <div class="leg-row">
-        <span class="dot" style="background:${colors[i]}"></span>
-        <span class="leg-label">${l}</span>
-        <span class="leg-val">${this._loading ? "…" : values[i].toFixed(2)}</span>
-        <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
-      </div>`).join("");
-
+  /** Injects the static <style> + content container once — never touched again by _render(). */
+  _ensureShell() {
+    if (this.shadowRoot.getElementById("content")) return;
     this.shadowRoot.innerHTML = `
       <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -337,7 +333,33 @@ class ElectricityPieCard extends HTMLElement {
         .error-msg { font-size: 11px; color: var(--error-color, #f44336); text-align: center; padding: 4px 0; }
         .purge-warning { font-size: 10px; color: var(--warning-color, #ff9800); text-align: center; padding: 4px 0; margin-top: 6px; }
       </style>
+      <div id="content"></div>
+    `;
+  }
 
+  _render(values = [0, 0, 0], error = false, purged = false) {
+    const cfg = this._config;
+    if (!cfg) return;
+    this._ensureShell();
+
+    const colors      = cfg.colors;
+    const labels      = ["00–08", "08–16", "16–24"];
+    const total       = values.reduce((a, b) => a + b, 0);
+    const pct         = (i) => total > 0 ? Math.round(values[i] / total * 100) : 0;
+    const dateStr     = this._selectedDate || this._localDateStr();
+    const displayDate = this._displayDate(dateStr);
+    const isToday     = dateStr === this._localDateStr();
+    const pieHTML     = this._buildPie(values, colors);
+
+    const legendRows = labels.map((l, i) => `
+      <div class="leg-row">
+        <span class="dot" style="background:${colors[i]}"></span>
+        <span class="leg-label">${l}</span>
+        <span class="leg-val">${this._loading ? "…" : values[i].toFixed(2)}</span>
+        <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
+      </div>`).join("");
+
+    this.shadowRoot.getElementById("content").innerHTML = `
       <ha-card>
         <div class="header">
           <span class="title">${cfg.title}</span>
