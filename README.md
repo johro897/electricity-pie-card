@@ -19,6 +19,7 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 - Warning displayed if data is missing due to recorder `purge_keep_days`
 - Single-segment pie renders correctly as a full ring
 - Configurable colors, title, and max days back
+- UI auto-translates to your Home Assistant language — English, Swedish, French, or German (falls back to English)
 - Registers with `window.customCards` for the HA card picker
 
 ---
@@ -49,7 +50,7 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `entity` | string | **required** | The accumulating energy meter sensor |
-| `title` | string | `Electricity consumption` | Card title |
+| `title` | string | *(none — auto-translated, e.g. "Electricity consumption" / "Elförbrukning")* | Card title |
 | `offset` | integer | *(not set)* | Days relative to today: `0` = today, `-1` = yesterday, `-2` = two days ago. When set, the card is **static** (no date navigation shown) |
 | `max_days_back` | integer | `30` | How many days back the date picker allows. Ignored when `offset` is set. See note on recorder below. |
 | `colors` | list | `["#5B8AF5","#F5A623","#7ED321"]` | Colors for the three periods |
@@ -120,9 +121,11 @@ recorder:
 ## Changelog
 
 ### v1.4
-**Fix: card UI was hardcoded in Swedish** — [#8](https://github.com/johro897/electricity-pie-card/issues/8)
-- All rendered text (nav button labels, date picker, loading/error messages, the "Total" row, the default title, and the config-validation error) is now in English, matching the rest of this project's cards and this README
-- The date label (e.g. "Tue, Aug 18") now formats using Home Assistant's configured language instead of being hardcoded to `sv-SE` — it will follow your instance's language automatically once translated strings are added in a future release
+**Language support** — [#8](https://github.com/johro897/electricity-pie-card/issues/8)
+- All rendered UI text (nav buttons, date picker, loading/error messages, the "Total" row, the default title, and the config-validation error) now auto-translates based on your Home Assistant instance's configured language
+- Supported languages: **English** (default), **Swedish**, **French**, **German** — falls back to English for any other language
+- Fixes the original report: the card's UI text used to be hardcoded in Swedish regardless of your HA language, which was confusing for non-Swedish users
+- The date label (e.g. "Tue, Aug 18") also correctly follows your HA language via the browser's native date formatting, rather than always using Swedish weekday/month names
 
 ### v1.3
 **Security hardening** — [#1](https://github.com/johro897/electricity-pie-card/issues/1)

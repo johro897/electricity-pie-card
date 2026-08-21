@@ -2,6 +2,8 @@
  * electricity-pie-card  v1.4
  * Pie chart for electricity consumption per 8h period.
  * Fetches history directly via the HA History API — no ApexCharts.
+ * UI language auto-detects from Home Assistant's configured language.
+ * Supported: en (default), sv, fr, de.
  *
  * Configuration:
  *   type: custom:electricity-pie-card
@@ -22,6 +24,69 @@
  *   - Fix: Live update of the "today" card when the sensor value changes
  *   - Fix: Single-slice pie now renders correctly as a full ring instead of a broken path
  */
+
+const DEFAULT_LANG = "en";
+
+// Every UI string the card renders, keyed by BCP-47 primary language subtag.
+// Not user-extensible via config — add a new block here to add a language.
+const TRANSLATIONS = {
+  en: {
+    title_default: "Electricity consumption",
+    entity_required: "entity is required",
+    today: "Today",
+    yesterday: "Yesterday",
+    previous_day: "Previous day",
+    next_day: "Next day",
+    choose_date: "Choose date",
+    choose_date_aria: "Choose date: {date}",
+    loading: "Fetching history…",
+    error: "Could not fetch history. Check the entity ID and that HA's recorder is active.",
+    purge_warning: "No history — check recorder purge_keep_days",
+    total_label: "Total {period}",
+  },
+  sv: {
+    title_default: "Elförbrukning",
+    entity_required: "entity krävs",
+    today: "Idag",
+    yesterday: "Igår",
+    previous_day: "Föregående dag",
+    next_day: "Nästa dag",
+    choose_date: "Välj datum",
+    choose_date_aria: "Välj datum: {date}",
+    loading: "Hämtar historik…",
+    error: "Kunde inte hämta historik. Kontrollera entity-id och att HA:s recorder är aktivt.",
+    purge_warning: "Ingen historik – kontrollera recorder purge_keep_days",
+    total_label: "Totalt {period}",
+  },
+  fr: {
+    title_default: "Consommation électrique",
+    entity_required: "entity est requis",
+    today: "Aujourd'hui",
+    yesterday: "Hier",
+    previous_day: "Jour précédent",
+    next_day: "Jour suivant",
+    choose_date: "Choisir une date",
+    choose_date_aria: "Choisir une date : {date}",
+    loading: "Récupération de l'historique…",
+    error: "Impossible de récupérer l'historique. Vérifiez l'entity_id et que le recorder de HA est actif.",
+    purge_warning: "Aucun historique — vérifiez recorder purge_keep_days",
+    total_label: "Total {period}",
+  },
+  de: {
+    title_default: "Stromverbrauch",
+    entity_required: "entity ist erforderlich",
+    today: "Heute",
+    yesterday: "Gestern",
+    previous_day: "Vorheriger Tag",
+    next_day: "Nächster Tag",
+    choose_date: "Datum wählen",
+    choose_date_aria: "Datum wählen: {date}",
+    loading: "Verlauf wird geladen…",
+    error: "Verlauf konnte nicht geladen werden. Prüfen Sie die Entity-ID und ob der Recorder von HA aktiv ist.",
+    purge_warning: "Kein Verlauf – prüfen Sie recorder purge_keep_days",
+    total_label: "Gesamt {period}",
+  },
+};
 
 class ElectricityPieCard extends HTMLElement {
   constructor() {
@@ -46,10 +111,10 @@ class ElectricityPieCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.entity) throw new Error("entity is required");
+    if (!config.entity) throw new Error(this._t("entity_required"));
     this._config = {
       entity:        config.entity,
-      title:         config.title || "Electricity consumption",
+      title:         config.title || null,
       max_days_back: config.max_days_back ?? 30,
       colors:        config.colors || ["#5B8AF5", "#F5A623", "#7ED321"],
       offset:        config.offset !== undefined ? parseInt(config.offset, 10) : null,
@@ -120,11 +185,28 @@ class ElectricityPieCard extends HTMLElement {
     return this._hass?.locale?.language || this._hass?.language || undefined;
   }
 
+  /** Resolves the HA-configured language to one of our translated languages, falling back to English. */
+  _lang() {
+    const raw = (this._hass?.locale?.language || this._hass?.language || DEFAULT_LANG).toLowerCase();
+    const primary = raw.split("-")[0];
+    return TRANSLATIONS[primary] ? primary : DEFAULT_LANG;
+  }
+
+  /** Looks up a UI string in the current language, with {placeholder} substitution. */
+  _t(key, replacements) {
+    const dict = TRANSLATIONS[this._lang()] || TRANSLATIONS[DEFAULT_LANG];
+    const raw = dict[key] ?? TRANSLATIONS[DEFAULT_LANG][key] ?? key;
+    if (!replacements) return raw;
+    return raw.replace(/\{([^}]+)\}/g, (match, k) =>
+      Object.prototype.hasOwnProperty.call(replacements, k) ? replacements[k] : match
+    );
+  }
+
   _displayDate(dateStr) {
-    if (!dateStr || dateStr === this._localDateStr()) return "Today";
+    if (!dateStr || dateStr === this._localDateStr()) return this._t("today");
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    if (dateStr === this._localDateStr(yesterday)) return "Yesterday";
+    if (dateStr === this._localDateStr(yesterday)) return this._t("yesterday");
     const d = new Date(dateStr + "T12:00:00");
     return d.toLocaleDateString(this._locale(), { weekday: "short", month: "short", day: "numeric" });
   }
@@ -390,21 +472,23 @@ class ElectricityPieCard extends HTMLElement {
         <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
       </div>`).join("");
 
+    const periodStr = isToday ? this._t("today").toLowerCase() : displayDate.toLowerCase();
+
     this.shadowRoot.getElementById("content").innerHTML = `
       <ha-card>
         <div class="header">
-          <span class="title">${this._esc(cfg.title)}</span>
+          <span class="title">${this._esc(cfg.title || this._t("title_default"))}</span>
           ${this._static ? "" : `
             <div class="nav">
-              <button class="nav-btn" id="btn-back" title="Previous day" aria-label="Previous day" ${!this._canGoBack() ? "disabled" : ""}>
+              <button class="nav-btn" id="btn-back" title="${this._t("previous_day")}" aria-label="${this._t("previous_day")}" ${!this._canGoBack() ? "disabled" : ""}>
                 <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
-              <span class="date-label" id="date-label" title="Choose date" role="button" tabindex="0" aria-label="Choose date: ${displayDate}">${displayDate}</span>
+              <span class="date-label" id="date-label" title="${this._t("choose_date")}" role="button" tabindex="0" aria-label="${this._t("choose_date_aria", { date: displayDate })}">${displayDate}</span>
               <input type="date" id="date-picker"
                 value="${dateStr}"
                 min="${this._offsetDate(this._localDateStr(), -cfg.max_days_back)}"
                 max="${this._localDateStr()}">
-              <button class="nav-btn" id="btn-fwd" title="Next day" aria-label="Next day" ${!this._canGoForward() ? "disabled" : ""}>
+              <button class="nav-btn" id="btn-fwd" title="${this._t("next_day")}" aria-label="${this._t("next_day")}" ${!this._canGoForward() ? "disabled" : ""}>
                 <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
             </div>
@@ -412,9 +496,9 @@ class ElectricityPieCard extends HTMLElement {
         </div>
 
         ${this._loading ? `
-          <div class="loading-overlay"><div class="spinner"></div> Fetching history…</div>
+          <div class="loading-overlay"><div class="spinner"></div> ${this._t("loading")}</div>
         ` : error ? `
-          <div class="error-msg">⚠ Could not fetch history. Check the entity ID and that HA's recorder is active.</div>
+          <div class="error-msg">⚠ ${this._t("error")}</div>
         ` : `
           <div class="chart-area">
             <div class="pie-wrap">
@@ -427,10 +511,10 @@ class ElectricityPieCard extends HTMLElement {
             <div class="legend">${legendRows}</div>
           </div>
           <div class="total-row">
-            <span class="total-lbl">Total ${isToday ? "today" : displayDate.toLowerCase()}</span>
+            <span class="total-lbl">${this._t("total_label", { period: periodStr })}</span>
             <span class="total-val">${total.toFixed(2)} kWh</span>
           </div>
-          ${purged ? `<div class="purge-warning">⚠ No history — check recorder purge_keep_days</div>` : ""}
+          ${purged ? `<div class="purge-warning">⚠ ${this._t("purge_warning")}</div>` : ""}
         `}
       </ha-card>
     `;
