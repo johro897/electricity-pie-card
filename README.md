@@ -49,7 +49,7 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `entity` | string | **required** | The accumulating energy meter sensor |
-| `title` | string | `Elförbrukning` | Card title |
+| `title` | string | `Electricity consumption` | Card title |
 | `offset` | integer | *(not set)* | Days relative to today: `0` = today, `-1` = yesterday, `-2` = two days ago. When set, the card is **static** (no date navigation shown) |
 | `max_days_back` | integer | `30` | How many days back the date picker allows. Ignored when `offset` is set. See note on recorder below. |
 | `colors` | list | `["#5B8AF5","#F5A623","#7ED321"]` | Colors for the three periods |
@@ -64,7 +64,7 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 ```yaml
 type: custom:electricity-pie-card
 entity: sensor.dsmr_reading_electricity_delivered_1
-title: Förbrukning idag
+title: Consumption today
 max_days_back: 30
 ```
 
@@ -72,7 +72,7 @@ max_days_back: 30
 ```yaml
 type: custom:electricity-pie-card
 entity: sensor.dsmr_reading_electricity_delivered_1
-title: Igår
+title: Yesterday
 offset: -1
 ```
 
@@ -118,6 +118,11 @@ recorder:
 ---
 
 ## Changelog
+
+### v1.4
+**Fix: card UI was hardcoded in Swedish** — [#8](https://github.com/johro897/electricity-pie-card/issues/8)
+- All rendered text (nav button labels, date picker, loading/error messages, the "Total" row, the default title, and the config-validation error) is now in English, matching the rest of this project's cards and this README
+- The date label (e.g. "Tue, Aug 18") now formats using Home Assistant's configured language instead of being hardcoded to `sv-SE` — it will follow your instance's language automatically once translated strings are added in a future release
 
 ### v1.3
 **Security hardening** — [#1](https://github.com/johro897/electricity-pie-card/issues/1)
