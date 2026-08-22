@@ -49,7 +49,7 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `entity` | string | **required** | The accumulating energy meter sensor |
+| `entity` | string | **required** | The accumulating energy meter sensor (see note below) |
 | `title` | string | *(none — auto-translated, e.g. "Electricity consumption" / "Elförbrukning")* | Card title |
 | `offset` | integer | *(not set)* | Days relative to today: `0` = today, `-1` = yesterday, `-2` = two days ago. When set, the card is **static** (no date navigation shown) |
 | `max_days_back` | integer | `30` | How many days back the date picker allows. Ignored when `offset` is set. See note on recorder below. |
@@ -101,9 +101,11 @@ colors:
 
 ## How it works
 
-The card calls HA's built-in `/api/history/period/` endpoint directly. It fetches raw state values for the sensor and calculates the consumption diff per 8-hour period locally in JavaScript — the same logic as ApexCharts `group_by: func: diff`, but without any charting library overhead.
+The card calls HA's built-in `/api/history/period/` endpoint directly. It fetches raw state values for the sensor and sums up the increases between consecutive readings within each 8-hour period, locally in JavaScript — any drop between readings is treated as a meter reset (e.g. a "today" counter zeroing overnight) rather than negative production, so a reset landing inside a period doesn't erase real production from the total.
 
 All API calls use **local time** (no UTC offset issues). Historical days are cached in memory for the session. Today's data is never cached and re-fetches whenever the sensor state changes.
+
+> **What kind of sensor works here:** `entity` needs to be a **monotonically accumulating meter** — a value that only ever counts up over the course of a day (optionally resetting to zero, e.g. a solar inverter's "today" production counter). Examples: a DSMR delivered-energy register, a solar inverter's daily production sensor. This card is **not** built for bidirectional "net" values that can legitimately go negative (e.g. a grid import/export balance that's negative while exporting and positive while importing) — there's no sensible way to chart "how much happened in this period" from a value that swings both directions without losing information. If you have separate accumulating sensors for import and export instead of one net value, use two instances of this card, one per sensor.
 
 ---
 
@@ -119,6 +121,12 @@ recorder:
 ---
 
 ## Changelog
+
+### v1.5
+**Fix: production during the first period could silently disappear** — [#9](https://github.com/johro897/electricity-pie-card/issues/9)
+- If your sensor stops reporting overnight (typical for a solar inverter with no production after dark) and its "today" counter resets once it wakes up, the card could compute a negative diff for the 00–08 period and clamp it to zero — silently losing that period's real production from the total, reported against a Goodwe PV inverter
+- The period calculation is now reset-aware: it walks the recorded history and sums only genuine increases between consecutive readings, treating any drop as a meter reset rather than negative production, instead of a simple start/end diff per period
+- No change for accumulating meters that never reset (e.g. DSMR) — verified the new calculation produces identical results to the previous one for that case
 
 ### v1.4
 **Language support** — [#8](https://github.com/johro897/electricity-pie-card/issues/8)
