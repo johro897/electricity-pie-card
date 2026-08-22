@@ -19,6 +19,7 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 - Warning displayed if data is missing due to recorder `purge_keep_days`
 - Single-segment pie renders correctly as a full ring
 - Configurable colors, title, and max days back
+- UI auto-translates to your Home Assistant language — English, Swedish, French, or German (falls back to English)
 - Registers with `window.customCards` for the HA card picker
 
 ---
@@ -49,7 +50,7 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `entity` | string | **required** | The accumulating energy meter sensor |
-| `title` | string | `Elförbrukning` | Card title |
+| `title` | string | *(none — auto-translated, e.g. "Electricity consumption" / "Elförbrukning")* | Card title |
 | `offset` | integer | *(not set)* | Days relative to today: `0` = today, `-1` = yesterday, `-2` = two days ago. When set, the card is **static** (no date navigation shown) |
 | `max_days_back` | integer | `30` | How many days back the date picker allows. Ignored when `offset` is set. See note on recorder below. |
 | `colors` | list | `["#5B8AF5","#F5A623","#7ED321"]` | Colors for the three periods |
@@ -64,7 +65,7 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 ```yaml
 type: custom:electricity-pie-card
 entity: sensor.dsmr_reading_electricity_delivered_1
-title: Förbrukning idag
+title: Consumption today
 max_days_back: 30
 ```
 
@@ -72,7 +73,7 @@ max_days_back: 30
 ```yaml
 type: custom:electricity-pie-card
 entity: sensor.dsmr_reading_electricity_delivered_1
-title: Igår
+title: Yesterday
 offset: -1
 ```
 
@@ -80,7 +81,7 @@ offset: -1
 ```yaml
 type: custom:electricity-pie-card
 entity: sensor.dsmr_reading_electricity_delivered_1
-title: I förrgår
+title: Two days ago
 offset: -2
 ```
 
@@ -88,7 +89,7 @@ offset: -2
 ```yaml
 type: custom:electricity-pie-card
 entity: sensor.dsmr_reading_electricity_delivered_1
-title: Historik
+title: History
 max_days_back: 90
 colors:
   - "#E57373"
@@ -118,6 +119,17 @@ recorder:
 ---
 
 ## Changelog
+
+### v1.4
+**Language support** — [#8](https://github.com/johro897/electricity-pie-card/issues/8)
+- All rendered UI text (nav buttons, date picker, loading/error messages, the "Total" row, the default title, and the config-validation error) now auto-translates based on your Home Assistant instance's configured language
+- Supported languages: **English** (default), **Swedish**, **French**, **German** — falls back to English for any other language
+- Fixes the original report: the card's UI text used to be hardcoded in Swedish regardless of your HA language, which was confusing for non-Swedish users
+- The date label (e.g. "Tue, Aug 18") also correctly follows your HA language via the browser's native date formatting, rather than always using Swedish weekday/month names
+
+**Hardening: capped the live-update debounce** — [#10](https://github.com/johro897/electricity-pie-card/issues/10)
+- Today's live update is debounced by 2 seconds so a fast-changing sensor doesn't trigger a history fetch on every single tick — but that debounce had no upper bound, so a sensor updating more often than every 2 seconds (e.g. some DSMR/P1 meters) could in theory keep deferring the reload indefinitely. It's now capped so a refresh is forced at least every 10 seconds even under continuous updates.
+- Investigated after a reported mismatch between the card's "today" total and Home Assistant's Energy dashboard — that specific mismatch turned out to be explained by the Energy dashboard lagging behind on its hourly statistics, not a bug in the card (confirmed against raw meter readings), so this is a preventive hardening fix rather than a confirmed data-correctness fix
 
 ### v1.3
 **Security hardening** — [#1](https://github.com/johro897/electricity-pie-card/issues/1)

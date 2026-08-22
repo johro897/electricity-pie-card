@@ -1,27 +1,92 @@
 /**
- * electricity-pie-card  v1.1
- * Pie chart för elförbrukning per 8h-period.
- * Hämtar historik direkt via HA History API – ingen ApexCharts.
+ * electricity-pie-card  v1.4
+ * Pie chart for electricity consumption per 8h period.
+ * Fetches history directly via the HA History API — no ApexCharts.
+ * UI language auto-detects from Home Assistant's configured language.
+ * Supported: en (default), sv, fr, de.
  *
- * Konfiguration:
+ * Configuration:
  *   type: custom:electricity-pie-card
  *   entity: sensor.dsmr_reading_electricity_delivered_1
- *   title: Förbrukning idag        # valfri
- *   max_days_back: 30              # valfri, default 30 (ignoreras om offset sätts)
- *                                  # OBS: begränsas av HA:s recorder purge_keep_days (standard 10 dagar)
- *   offset: 0                      # valfri: 0=idag, -1=igår, -2=i förrgår osv.
- *                                  # Om offset sätts visas INTE datumväljaren (statiskt kort)
- *   colors:                        # valfri
+ *   title: Consumption today      # optional
+ *   max_days_back: 30              # optional, default 30 (ignored if offset is set)
+ *                                  # NOTE: limited by HA's recorder purge_keep_days (default 10 days)
+ *   offset: 0                      # optional: 0=today, -1=yesterday, -2=day before yesterday, etc.
+ *                                  # If offset is set, the date picker is NOT shown (static card)
+ *   colors:                        # optional
  *     - "#5B8AF5"
  *     - "#F5A623"
  *     - "#7ED321"
  *
- * Ändringar v1.1:
- *   - Fix: Tidszoner – använder nu lokal tid i API-anrop istället för UTC (toISOString)
- *   - Fix: Varning visas om historik saknas pga recorder purge_keep_days
- *   - Fix: Live-uppdatering av "idag"-kortet när sensorvärdet ändras
- *   - Fix: En-slice-pie ritas korrekt som full ring istället för trasig path
+ * Changes in v1.1:
+ *   - Fix: Timezones — now uses local time in API calls instead of UTC (toISOString)
+ *   - Fix: Warning shown when history is missing due to recorder purge_keep_days
+ *   - Fix: Live update of the "today" card when the sensor value changes
+ *   - Fix: Single-slice pie now renders correctly as a full ring instead of a broken path
  */
+
+const DEFAULT_LANG = "en";
+
+// Every UI string the card renders, keyed by BCP-47 primary language subtag.
+// Not user-extensible via config — add a new block here to add a language.
+const TRANSLATIONS = {
+  en: {
+    title_default: "Electricity consumption",
+    entity_required: "entity is required",
+    today: "Today",
+    yesterday: "Yesterday",
+    previous_day: "Previous day",
+    next_day: "Next day",
+    choose_date: "Choose date",
+    choose_date_aria: "Choose date: {date}",
+    loading: "Fetching history…",
+    error: "Could not fetch history. Check the entity ID and that HA's recorder is active.",
+    purge_warning: "No history — check recorder purge_keep_days",
+    total_label: "Total {period}",
+  },
+  sv: {
+    title_default: "Elförbrukning",
+    entity_required: "entity krävs",
+    today: "Idag",
+    yesterday: "Igår",
+    previous_day: "Föregående dag",
+    next_day: "Nästa dag",
+    choose_date: "Välj datum",
+    choose_date_aria: "Välj datum: {date}",
+    loading: "Hämtar historik…",
+    error: "Kunde inte hämta historik. Kontrollera entity-id och att HA:s recorder är aktivt.",
+    purge_warning: "Ingen historik – kontrollera recorder purge_keep_days",
+    total_label: "Totalt {period}",
+  },
+  fr: {
+    title_default: "Consommation électrique",
+    entity_required: "entity est requis",
+    today: "Aujourd'hui",
+    yesterday: "Hier",
+    previous_day: "Jour précédent",
+    next_day: "Jour suivant",
+    choose_date: "Choisir une date",
+    choose_date_aria: "Choisir une date : {date}",
+    loading: "Récupération de l'historique…",
+    error: "Impossible de récupérer l'historique. Vérifiez l'entity_id et que le recorder de HA est actif.",
+    purge_warning: "Aucun historique — vérifiez recorder purge_keep_days",
+    total_label: "Total {period}",
+  },
+  de: {
+    title_default: "Stromverbrauch",
+    entity_required: "entity ist erforderlich",
+    today: "Heute",
+    yesterday: "Gestern",
+    previous_day: "Vorheriger Tag",
+    next_day: "Nächster Tag",
+    choose_date: "Datum wählen",
+    choose_date_aria: "Datum wählen: {date}",
+    loading: "Verlauf wird geladen…",
+    error: "Verlauf konnte nicht geladen werden. Prüfen Sie die Entity-ID und ob der Recorder von HA aktiv ist.",
+    purge_warning: "Kein Verlauf – prüfen Sie recorder purge_keep_days",
+    total_label: "Gesamt {period}",
+  },
+};
 
 class ElectricityPieCard extends HTMLElement {
   constructor() {
@@ -29,13 +94,14 @@ class ElectricityPieCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._hass         = null;
     this._config       = null;
-    this._selectedDate = null;   // null = idag
+    this._selectedDate = null;   // null = today
     this._cache        = {};     // "YYYY-MM-DD" -> { values, purged }
     this._loading      = false;
     this._initialized  = false;
     this._static       = false;
-    this._lastState    = null;   // för live-uppdatering
-    this._reloadDebounce = null; // debounce-timer för live-uppdateringens omladdning
+    this._lastState    = null;   // for live updates
+    this._reloadDebounce = null; // debounce timer for the live-update reload
+    this._reloadMaxWaitAt = null; // timestamp: force a reload by here regardless of continued changes
   }
 
   disconnectedCallback() {
@@ -43,13 +109,14 @@ class ElectricityPieCard extends HTMLElement {
       clearTimeout(this._reloadDebounce);
       this._reloadDebounce = null;
     }
+    this._reloadMaxWaitAt = null;
   }
 
   setConfig(config) {
-    if (!config.entity) throw new Error("entity krävs");
+    if (!config.entity) throw new Error(this._t("entity_required"));
     this._config = {
       entity:        config.entity,
-      title:         config.title || "Elförbrukning",
+      title:         config.title || null,
       max_days_back: config.max_days_back ?? 30,
       colors:        config.colors || ["#5B8AF5", "#F5A623", "#7ED321"],
       offset:        config.offset !== undefined ? parseInt(config.offset, 10) : null,
@@ -73,28 +140,39 @@ class ElectricityPieCard extends HTMLElement {
       return;
     }
 
-    // Live-uppdatering: om vi visar "idag" och sensorvärdet har ändrats → ladda om.
-    // Jämförelsen är bara en stränglikhet – mikrosekundsnabb, ingen prestandapåverkan.
+    // Live update: if we're showing "today" and the sensor value has changed → reload.
+    // The comparison is just a string equality check — microsecond-fast, no performance impact.
     const isToday = !this._selectedDate || this._selectedDate === this._localDateStr();
     if (isToday && !this._loading) {
       const newState = hass.states[this._config.entity]?.state;
       if (newState !== undefined && newState !== this._lastState) {
         this._lastState = newState;
-        delete this._cache[this._localDateStr()]; // invalidera cache för idag
+        delete this._cache[this._localDateStr()]; // invalidate today's cache
+
         // Debounce: a sensor that updates every few seconds would otherwise
         // trigger a fresh history/period/ fetch on every single tick.
+        // Capped with a max wait — a sensor that updates more often than the
+        // 2s debounce window (e.g. a DSMR meter reporting every few seconds)
+        // would otherwise keep pushing the reload back indefinitely, leaving
+        // today's total stuck on a stale snapshot for as long as updates
+        // kept arriving.
+        const now = Date.now();
+        if (!this._reloadMaxWaitAt) this._reloadMaxWaitAt = now + 10000;
+        const delay = Math.min(2000, Math.max(0, this._reloadMaxWaitAt - now));
+
         if (this._reloadDebounce) clearTimeout(this._reloadDebounce);
         this._reloadDebounce = setTimeout(() => {
           this._reloadDebounce = null;
+          this._reloadMaxWaitAt = null;
           this._loadAndRender();
-        }, 2000);
+        }, delay);
       }
     }
   }
 
-  // ─── Date helpers (lokal tid, aldrig UTC) ─────────────────────────────────
+  // ─── Date helpers (local time, never UTC) ─────────────────────────────────
 
-  /** Dagens datum i lokal tid som "YYYY-MM-DD" */
+  /** Today's date in local time as "YYYY-MM-DD" */
   _localDateStr(date = new Date()) {
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -103,9 +181,9 @@ class ElectricityPieCard extends HTMLElement {
   }
 
   /**
-   * Formaterar ett Date-objekt till lokal ISO-sträng UTAN "Z".
-   * HA tolkar strängar utan Z som lokal tid, vilket är vad vi vill.
-   * Exempel: "2026-05-14T00:00:00"
+   * Formats a Date object as a local ISO string WITHOUT "Z".
+   * HA interprets strings without Z as local time, which is what we want.
+   * Example: "2026-05-14T00:00:00"
    */
   _localISO(date) {
     const p = (n) => String(n).padStart(2, "0");
@@ -115,13 +193,35 @@ class ElectricityPieCard extends HTMLElement {
     );
   }
 
+  /** Resolves the language to format dates with — the HA-configured language, falling back to the browser default. */
+  _locale() {
+    return this._hass?.locale?.language || this._hass?.language || undefined;
+  }
+
+  /** Resolves the HA-configured language to one of our translated languages, falling back to English. */
+  _lang() {
+    const raw = (this._hass?.locale?.language || this._hass?.language || DEFAULT_LANG).toLowerCase();
+    const primary = raw.split("-")[0];
+    return TRANSLATIONS[primary] ? primary : DEFAULT_LANG;
+  }
+
+  /** Looks up a UI string in the current language, with {placeholder} substitution. */
+  _t(key, replacements) {
+    const dict = TRANSLATIONS[this._lang()] || TRANSLATIONS[DEFAULT_LANG];
+    const raw = dict[key] ?? TRANSLATIONS[DEFAULT_LANG][key] ?? key;
+    if (!replacements) return raw;
+    return raw.replace(/\{([^}]+)\}/g, (match, k) =>
+      Object.prototype.hasOwnProperty.call(replacements, k) ? replacements[k] : match
+    );
+  }
+
   _displayDate(dateStr) {
-    if (!dateStr || dateStr === this._localDateStr()) return "Idag";
+    if (!dateStr || dateStr === this._localDateStr()) return this._t("today");
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    if (dateStr === this._localDateStr(yesterday)) return "Igår";
+    if (dateStr === this._localDateStr(yesterday)) return this._t("yesterday");
     const d = new Date(dateStr + "T12:00:00");
-    return d.toLocaleDateString("sv-SE", { weekday: "short", month: "short", day: "numeric" });
+    return d.toLocaleDateString(this._locale(), { weekday: "short", month: "short", day: "numeric" });
   }
 
   _offsetDate(dateStr, days) {
@@ -147,10 +247,10 @@ class ElectricityPieCard extends HTMLElement {
 
     const entity = this._config.entity;
 
-    // Lokal tid utan Z – HA tolkar detta korrekt oavsett sommar/vintertid
+    // Local time without Z — HA interprets this correctly regardless of daylight saving
     const dayStart  = new Date(dateStr + "T00:00:00");
     const dayEnd    = new Date(dateStr + "T23:59:59");
-    const fetchFrom = new Date(dayStart.getTime() - 60 * 60 * 1000); // 1h marginal
+    const fetchFrom = new Date(dayStart.getTime() - 60 * 60 * 1000); // 1h margin
 
     const startISO = this._localISO(fetchFrom);
     const endISO   = this._localISO(dayEnd);
@@ -159,7 +259,7 @@ class ElectricityPieCard extends HTMLElement {
     const resp  = await this._hass.callApi("GET", path);
     const history = resp?.[0] ?? [];
 
-    // Tom respons → troligtvis rensat av recorder purge_keep_days
+    // Empty response → likely purged by recorder purge_keep_days
     if (history.length < 2) {
       return { values: [0, 0, 0], purged: true };
     }
@@ -197,7 +297,7 @@ class ElectricityPieCard extends HTMLElement {
     });
 
     const result = { values, purged: false };
-    // Cacha inte idag – värdet ändras löpande
+    // Don't cache today — the value keeps changing
     if (dateStr !== this._localDateStr()) {
       this._cache[dateStr] = result;
     }
@@ -217,7 +317,7 @@ class ElectricityPieCard extends HTMLElement {
       this._loading = false;
       this._render(result.values, false, result.purged);
     } catch (e) {
-      console.error("electricity-pie-card: fel vid historik-hämtning", e);
+      console.error("electricity-pie-card: error fetching history", e);
       this._loading = false;
       this._render([0, 0, 0], true, false);
     }
@@ -256,7 +356,7 @@ class ElectricityPieCard extends HTMLElement {
         stroke="var(--divider-color, rgba(0,0,0,.1))" stroke-width="${strokeW}"/>`;
     }
 
-    // En-slice-fix: ett enda segment med värde → hel ring i den färgen
+    // Single-slice fix: one segment with a value → full ring in that color
     const activeCount = values.filter(v => v > 0).length;
     if (activeCount === 1) {
       const i = values.findIndex(v => v > 0);
@@ -385,21 +485,23 @@ class ElectricityPieCard extends HTMLElement {
         <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
       </div>`).join("");
 
+    const periodStr = isToday ? this._t("today").toLowerCase() : displayDate.toLowerCase();
+
     this.shadowRoot.getElementById("content").innerHTML = `
       <ha-card>
         <div class="header">
-          <span class="title">${this._esc(cfg.title)}</span>
+          <span class="title">${this._esc(cfg.title || this._t("title_default"))}</span>
           ${this._static ? "" : `
             <div class="nav">
-              <button class="nav-btn" id="btn-back" title="Föregående dag" aria-label="Föregående dag" ${!this._canGoBack() ? "disabled" : ""}>
+              <button class="nav-btn" id="btn-back" title="${this._t("previous_day")}" aria-label="${this._t("previous_day")}" ${!this._canGoBack() ? "disabled" : ""}>
                 <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
-              <span class="date-label" id="date-label" title="Välj datum" role="button" tabindex="0" aria-label="Välj datum: ${displayDate}">${displayDate}</span>
+              <span class="date-label" id="date-label" title="${this._t("choose_date")}" role="button" tabindex="0" aria-label="${this._t("choose_date_aria", { date: displayDate })}">${displayDate}</span>
               <input type="date" id="date-picker"
                 value="${dateStr}"
                 min="${this._offsetDate(this._localDateStr(), -cfg.max_days_back)}"
                 max="${this._localDateStr()}">
-              <button class="nav-btn" id="btn-fwd" title="Nästa dag" aria-label="Nästa dag" ${!this._canGoForward() ? "disabled" : ""}>
+              <button class="nav-btn" id="btn-fwd" title="${this._t("next_day")}" aria-label="${this._t("next_day")}" ${!this._canGoForward() ? "disabled" : ""}>
                 <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
             </div>
@@ -407,9 +509,9 @@ class ElectricityPieCard extends HTMLElement {
         </div>
 
         ${this._loading ? `
-          <div class="loading-overlay"><div class="spinner"></div> Hämtar historik…</div>
+          <div class="loading-overlay"><div class="spinner"></div> ${this._t("loading")}</div>
         ` : error ? `
-          <div class="error-msg">⚠ Kunde inte hämta historik. Kontrollera entity-id och att HA:s recorder är aktivt.</div>
+          <div class="error-msg">⚠ ${this._t("error")}</div>
         ` : `
           <div class="chart-area">
             <div class="pie-wrap">
@@ -422,15 +524,15 @@ class ElectricityPieCard extends HTMLElement {
             <div class="legend">${legendRows}</div>
           </div>
           <div class="total-row">
-            <span class="total-lbl">Total ${isToday ? "idag" : displayDate.toLowerCase()}</span>
+            <span class="total-lbl">${this._t("total_label", { period: periodStr })}</span>
             <span class="total-val">${total.toFixed(2)} kWh</span>
           </div>
-          ${purged ? `<div class="purge-warning">⚠ Ingen historik – kontrollera recorder purge_keep_days</div>` : ""}
+          ${purged ? `<div class="purge-warning">⚠ ${this._t("purge_warning")}</div>` : ""}
         `}
       </ha-card>
     `;
 
-    // ── Event listeners (endast i interaktivt läge) ──
+    // ── Event listeners (interactive mode only) ──
     if (!this._static) {
       this.shadowRoot.getElementById("btn-back")?.addEventListener("click", () => {
         this._selectedDate = this._offsetDate(dateStr, -1);
@@ -464,5 +566,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "electricity-pie-card",
   name: "Electricity Pie Card",
-  description: "Elförbrukning per 8h-period med historik",
+  description: "Electricity consumption per 8h period with history",
 });
