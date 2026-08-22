@@ -119,6 +119,11 @@ recorder:
 
 ## Changelog
 
+### v1.4
+**Hardening: capped the live-update debounce** — [#10](https://github.com/johro897/electricity-pie-card/issues/10)
+- Today's live update is debounced by 2 seconds so a fast-changing sensor doesn't trigger a history fetch on every single tick — but that debounce had no upper bound, so a sensor updating more often than every 2 seconds (e.g. some DSMR/P1 meters) could in theory keep deferring the reload indefinitely. It's now capped so a refresh is forced at least every 10 seconds even under continuous updates.
+- Investigated after a reported mismatch between the card's "today" total and Home Assistant's Energy dashboard — that specific mismatch turned out to be explained by the Energy dashboard lagging behind on its hourly statistics, not a bug in the card (confirmed against raw meter readings), so this is a preventive hardening fix rather than a confirmed data-correctness fix
+
 ### v1.3
 **Security hardening** — [#1](https://github.com/johro897/electricity-pie-card/issues/1)
 - The card title is now HTML-escaped, and configured `colors` values are now validated to actually look like a CSS color before being used — previously both were inserted into the card's markup as-is, so a crafted value in a shared/pasted dashboard YAML could break out of an attribute or inject markup
