@@ -101,7 +101,7 @@ colors:
 
 ## How it works
 
-The card calls HA's built-in `/api/history/period/` endpoint directly. It fetches raw state values for the sensor and calculates the consumption diff per 8-hour period locally in JavaScript — the same logic as ApexCharts `group_by: func: diff`, but without any charting library overhead.
+The card calls HA's built-in `/api/history/period/` endpoint directly. It fetches raw state values for the sensor and sums up the increases between consecutive readings within each 8-hour period, locally in JavaScript — any drop between readings is treated as a meter reset (e.g. a "today" counter zeroing overnight) rather than negative production, so a reset landing inside a period doesn't erase real production from the total.
 
 All API calls use **local time** (no UTC offset issues). Historical days are cached in memory for the session. Today's data is never cached and re-fetches whenever the sensor state changes.
 
@@ -119,6 +119,12 @@ recorder:
 ---
 
 ## Changelog
+
+### v1.5
+**Fix: production during the first period could silently disappear** — [#9](https://github.com/johro897/electricity-pie-card/issues/9)
+- If your sensor stops reporting overnight (typical for a solar inverter with no production after dark) and its "today" counter resets once it wakes up, the card could compute a negative diff for the 00–08 period and clamp it to zero — silently losing that period's real production from the total, reported against a Goodwe PV inverter
+- The period calculation is now reset-aware: it walks the recorded history and sums only genuine increases between consecutive readings, treating any drop as a meter reset rather than negative production, instead of a simple start/end diff per period
+- No change for accumulating meters that never reset (e.g. DSMR) — verified the new calculation produces identical results to the previous one for that case
 
 ### v1.4
 **Language support** — [#8](https://github.com/johro897/electricity-pie-card/issues/8)

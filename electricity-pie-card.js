@@ -280,21 +280,27 @@ class ElectricityPieCard extends HTMLElement {
       { start: new Date(dateStr + "T16:00:00").getTime(), end: new Date(dateStr + "T23:59:59").getTime() },
     ];
 
-    const getValueAt = (t) => {
-      let best = null;
-      for (const p of points) {
-        if (p.t <= t) best = p;
-        else break;
-      }
-      return best?.v ?? null;
-    };
-
-    const values = periods.map(period => {
-      const vStart = getValueAt(period.start);
-      const vEnd   = getValueAt(period.end);
-      if (vStart === null || vEnd === null) return 0;
-      return Math.max(0, parseFloat((vEnd - vStart).toFixed(3)));
-    });
+    // Reset-aware accumulation instead of a naive start/end diff per period.
+    // A meter that stops reporting overnight (e.g. a solar inverter with no
+    // production after dark) can leave a stale pre-midnight reading as the
+    // last known value before today's first real point — diffing directly
+    // against that produces a negative delta and silently loses the whole
+    // first period's production (issue #9). Walking consecutive points and
+    // only summing *increases* treats any drop as a meter reset rather than
+    // negative production, and attributes each real increase to whichever
+    // period it actually happened in.
+    const dayStartMs = periods[0].start;
+    const rawTotals = [0, 0, 0];
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      if (curr.t <= dayStartMs) continue; // still in yesterday's margin
+      const delta = curr.v - prev.v;
+      if (delta <= 0) continue; // meter reset or unchanged — never negative production
+      const idx = periods.findIndex(p => curr.t > p.start && curr.t <= p.end);
+      if (idx >= 0) rawTotals[idx] += delta;
+    }
+    const values = rawTotals.map(v => parseFloat(v.toFixed(3)));
 
     const result = { values, purged: false };
     // Don't cache today — the value keeps changing
