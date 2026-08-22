@@ -101,6 +101,7 @@ class ElectricityPieCard extends HTMLElement {
     this._static       = false;
     this._lastState    = null;   // for live updates
     this._reloadDebounce = null; // debounce timer for the live-update reload
+    this._reloadMaxWaitAt = null; // timestamp: force a reload by here regardless of continued changes
   }
 
   disconnectedCallback() {
@@ -108,6 +109,7 @@ class ElectricityPieCard extends HTMLElement {
       clearTimeout(this._reloadDebounce);
       this._reloadDebounce = null;
     }
+    this._reloadMaxWaitAt = null;
   }
 
   setConfig(config) {
@@ -146,13 +148,24 @@ class ElectricityPieCard extends HTMLElement {
       if (newState !== undefined && newState !== this._lastState) {
         this._lastState = newState;
         delete this._cache[this._localDateStr()]; // invalidate today's cache
+
         // Debounce: a sensor that updates every few seconds would otherwise
         // trigger a fresh history/period/ fetch on every single tick.
+        // Capped with a max wait — a sensor that updates more often than the
+        // 2s debounce window (e.g. a DSMR meter reporting every few seconds)
+        // would otherwise keep pushing the reload back indefinitely, leaving
+        // today's total stuck on a stale snapshot for as long as updates
+        // kept arriving.
+        const now = Date.now();
+        if (!this._reloadMaxWaitAt) this._reloadMaxWaitAt = now + 10000;
+        const delay = Math.min(2000, Math.max(0, this._reloadMaxWaitAt - now));
+
         if (this._reloadDebounce) clearTimeout(this._reloadDebounce);
         this._reloadDebounce = setTimeout(() => {
           this._reloadDebounce = null;
+          this._reloadMaxWaitAt = null;
           this._loadAndRender();
-        }, 2000);
+        }, delay);
       }
     }
   }

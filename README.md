@@ -81,7 +81,7 @@ offset: -1
 ```yaml
 type: custom:electricity-pie-card
 entity: sensor.dsmr_reading_electricity_delivered_1
-title: I förrgår
+title: Two days ago
 offset: -2
 ```
 
@@ -89,7 +89,7 @@ offset: -2
 ```yaml
 type: custom:electricity-pie-card
 entity: sensor.dsmr_reading_electricity_delivered_1
-title: Historik
+title: History
 max_days_back: 90
 colors:
   - "#E57373"
@@ -126,6 +126,10 @@ recorder:
 - Supported languages: **English** (default), **Swedish**, **French**, **German** — falls back to English for any other language
 - Fixes the original report: the card's UI text used to be hardcoded in Swedish regardless of your HA language, which was confusing for non-Swedish users
 - The date label (e.g. "Tue, Aug 18") also correctly follows your HA language via the browser's native date formatting, rather than always using Swedish weekday/month names
+
+**Hardening: capped the live-update debounce** — [#10](https://github.com/johro897/electricity-pie-card/issues/10)
+- Today's live update is debounced by 2 seconds so a fast-changing sensor doesn't trigger a history fetch on every single tick — but that debounce had no upper bound, so a sensor updating more often than every 2 seconds (e.g. some DSMR/P1 meters) could in theory keep deferring the reload indefinitely. It's now capped so a refresh is forced at least every 10 seconds even under continuous updates.
+- Investigated after a reported mismatch between the card's "today" total and Home Assistant's Energy dashboard — that specific mismatch turned out to be explained by the Energy dashboard lagging behind on its hourly statistics, not a bug in the card (confirmed against raw meter readings), so this is a preventive hardening fix rather than a confirmed data-correctness fix
 
 ### v1.3
 **Security hardening** — [#1](https://github.com/johro897/electricity-pie-card/issues/1)
