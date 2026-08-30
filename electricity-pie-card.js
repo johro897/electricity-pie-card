@@ -140,6 +140,7 @@ class ElectricityPieCard extends HTMLElement {
       max_days_back: config.max_days_back ?? 30,
       periods:       this._parsePeriods(config.periods),
       colors:        config.colors || ["#5B8AF5", "#F5A623", "#7ED321"],
+      unit:          config.unit || "kWh",
       offset:        config.offset !== undefined ? parseInt(config.offset, 10) : null,
     };
     if (this._config.offset !== null) {
@@ -411,7 +412,7 @@ class ElectricityPieCard extends HTMLElement {
 
   /** Exact-value tooltip text for period `i` — surfaced as an SVG <title> (native hover tooltip). */
   _sliceTooltip(labels, values, i) {
-    return this._esc(`${labels[i]}: ${values[i].toFixed(2)} kWh`);
+    return this._esc(`${labels[i]}: ${values[i].toFixed(2)} ${this._config.unit}`);
   }
 
   _buildPie(values, colors, labels) {
@@ -591,14 +592,14 @@ class ElectricityPieCard extends HTMLElement {
               <svg class="pie" width="120" height="120" viewBox="0 0 120 120">${pieHTML}</svg>
               <div class="center">
                 <div class="center-kwh">${total.toFixed(2)}</div>
-                <div class="center-sub">kWh</div>
+                <div class="center-sub">${this._esc(cfg.unit)}</div>
               </div>
             </div>
             <div class="legend">${legendRows}</div>
           </div>
           <div class="total-row">
             <span class="total-lbl">${this._t("total_label", { period: periodStr })}</span>
-            <span class="total-val">${total.toFixed(2)} kWh</span>
+            <span class="total-val">${total.toFixed(2)} ${this._esc(cfg.unit)}</span>
           </div>
           ${purged ? `<div class="purge-warning">⚠ ${this._t("purge_warning")}</div>` : ""}
         `}

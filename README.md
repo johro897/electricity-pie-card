@@ -56,6 +56,7 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 | `max_days_back` | integer | `30` | How many days back the date picker allows. Ignored when `offset` is set. See note on recorder below. |
 | `periods` | list | three 8h windows: `00:00–08:00`, `08:00–16:00`, `16:00–24:00` | Custom time-of-day boundaries, e.g. to match your utility's tariff windows. Each entry is `{start: "HH:MM", end: "HH:MM"}`; `end: "24:00"` means midnight. Invalid or empty config falls back to the default three periods. See example below. |
 | `colors` | list | `["#5B8AF5","#F5A623","#7ED321"]` | Colors matched to `periods` by index. Any period without an explicit color falls back to a built-in palette. |
+| `unit` | string | `"kWh"` | Unit label shown in the center total, the total row, and slice tooltips. Set this if `entity` is a non-electricity accumulating meter, e.g. `"m³"` for water/gas. |
 
 > **Note on `max_days_back`:** This is limited by Home Assistant's recorder `purge_keep_days` setting (default: **10 days**). If you navigate to a date outside the recorder window, the card will show a warning. To increase history retention, set `purge_keep_days` in your recorder config.
 
@@ -117,6 +118,14 @@ colors:
   - "#5B8AF5"
 ```
 
+**Non-electricity meter — water consumption in m³:**
+```yaml
+type: custom:electricity-pie-card
+entity: sensor.water_meter_daily
+title: Water usage
+unit: "m³"
+```
+
 ---
 
 ## How it works
@@ -149,7 +158,10 @@ recorder:
 - No config change needed for existing dashboards — omitting `periods` keeps the original three 8-hour windows, verified to produce identical results to before
 
 **Hover tooltip with exact slice value** — [#5](https://github.com/johro897/electricity-pie-card/issues/5)
-- Hovering a pie slice (or the full ring in single-period days) now shows its exact period and kWh value as a native tooltip, instead of only dimming on hover with no way to read the precise number without cross-referencing the legend
+- Hovering a pie slice (or the full ring in single-period days) now shows its exact period and value as a native tooltip, instead of only dimming on hover with no way to read the precise number without cross-referencing the legend
+
+**Configurable unit** — [#4](https://github.com/johro897/electricity-pie-card/issues/4)
+- The `kWh` label was hardcoded even though the card already worked with any accumulating meter (e.g. a water or gas sensor). A new `unit` config option (default `"kWh"`) makes that support real — it's now shown in the center total, the total row, and slice tooltips
 
 ### v1.5
 **Fix: production during the first period could silently disappear** — [#9](https://github.com/johro897/electricity-pie-card/issues/9)
