@@ -1,5 +1,5 @@
 /**
- * electricity-pie-card  v1.4
+ * electricity-pie-card
  * Pie chart for electricity consumption split into time-of-day periods.
  * Fetches history directly via the HA History API — no ApexCharts.
  * UI language auto-detects from Home Assistant's configured language.

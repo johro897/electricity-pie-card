@@ -53,7 +53,7 @@ Use the visual editor (**Edit dashboard → Add card → Electricity Pie Card**,
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `entity` | string | **required** | The accumulating energy meter sensor (see note below) |
+| `entity` | string | **required** | The accumulating meter sensor — electricity by default, or any other accumulating meter via `unit` (see note below) |
 | `title` | string | *(none — auto-translated, e.g. "Electricity consumption" / "Elförbrukning")* | Card title |
 | `offset` | integer | *(not set)* | Days relative to today: `0` = today, `-1` = yesterday, `-2` = two days ago. When set, the card is **static** (no date navigation shown) |
 | `max_days_back` | integer | `30` | How many days back the date picker allows. Ignored when `offset` is set. See note on recorder below. |
@@ -154,7 +154,7 @@ recorder:
 
 ## Changelog
 
-### v1.6 (in progress — heading may be renamed at release, see project CLAUDE.md)
+### v1.6.0
 **Configurable period boundaries** — [#6](https://github.com/johro897/electricity-pie-card/issues/6)
 - The three time-of-day periods were previously hardcoded to fixed 8-hour windows (00–08 / 08–16 / 16–24). A new `periods` config option lets you define any number of custom boundaries, e.g. to match your utility's actual tariff windows
 - `colors` now matches `periods` by index; any period without an explicit color falls back to a built-in palette
