@@ -24,6 +24,8 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 - UI auto-translates to your Home Assistant language — English, Swedish, French, or German (falls back to English)
 - Registers with `window.customCards` for the HA card picker
 
+![Hovering a slice shows its exact period and value](screenshots/hover.png)
+
 ---
 
 ## Installation
@@ -48,6 +50,8 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 ## Configuration
 
 Use the visual editor (**Edit dashboard → Add card → Electricity Pie Card**, or ⋮ → Edit on an existing card) to set `entity`, `title`, `unit`, `offset`, and `max_days_back` without writing YAML. `periods` and `colors` aren't covered by the visual editor yet — switch to the YAML editor (⋮ menu in the card editor) to set those; the visual editor won't touch or remove them.
+
+![Visual config editor](screenshots/editor.png)
 
 ### Options
 
@@ -120,6 +124,26 @@ colors:
   - "#F5A623"
   - "#5B8AF5"
 ```
+
+![Custom tariff periods](screenshots/tariffs.png)
+
+**More than 3 periods — automatic fallback colors:**
+```yaml
+type: custom:electricity-pie-card
+entity: sensor.dsmr_reading_electricity_delivered_1
+periods:
+  - start: "00:00"
+    end: "04:00"
+  - start: "04:00"
+    end: "18:00"
+  - start: "18:00"
+    end: "20:00"
+  - start: "20:00"
+    end: "24:00"
+```
+No `colors` needed — any period past the third automatically gets a color from the built-in fallback palette.
+
+![Four periods with fallback colors](screenshots/multiple_times.png)
 
 **Non-electricity meter — water consumption in m³:**
 ```yaml
