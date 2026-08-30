@@ -30,6 +30,14 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 
 ## Installation
 
+### 1. Via HACS (recommended)
+
+Electricity Pie Card is available directly in the HACS default catalog. Search for **Electricity Pie Card** under **Frontend** in HACS and install it — no custom repository needed.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=johro897&repository=electricity-pie-card&category=dashboard)
+
+### 2. Manual install
+
 1. Copy `electricity-pie-card.js` to `/config/www/electricity-pie-card.js`
 
 2. Add the resource in `configuration.yaml`:
@@ -50,6 +58,8 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 ## Configuration
 
 Use the visual editor (**Edit dashboard → Add card → Electricity Pie Card**, or ⋮ → Edit on an existing card) to set `entity`, `title`, `unit`, `offset`, and `max_days_back` without writing YAML. `periods` and `colors` aren't covered by the visual editor yet — switch to the YAML editor (⋮ menu in the card editor) to set those; the visual editor won't touch or remove them.
+
+> **Not sure of your meter's entity ID?** The visual editor's entity picker lists it for you. Writing YAML by hand instead: check **Developer Tools → States**, filter by your meter's name, and use the exact `sensor.*` ID shown there — don't assume it matches the examples below verbatim.
 
 ![Visual config editor](screenshots/editor.png)
 
@@ -175,6 +185,18 @@ recorder:
 ```
 
 ---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| Card not found / blank card | Verify the resource is registered under **Settings → Dashboards → Resources** and hard-refresh the browser (`Ctrl/Cmd + Shift + R`) |
+| "No history — check recorder purge_keep_days" warning | The selected day is outside your recorder's retention window, or the entity has no recorded history yet — see [Recorder configuration](#recorder-configuration-optional) |
+| Totals look wrong, or every period shows 0 | `entity` likely isn't a monotonically accumulating meter (e.g. it's a bidirectional net import/export value) — see [What kind of sensor works here](#how-it-works) |
+| Custom `periods` config seems ignored, card shows the default 00–08/08–16/16–24 windows | Invalid or malformed `periods` YAML falls back to the default three periods entirely (not per-entry) — double-check each entry is `{start: "HH:MM", end: "HH:MM"}` |
+| `periods`/`colors` don't show up in the visual editor | Expected — the visual editor doesn't cover those two options yet, use the YAML editor (⋮ menu) instead. See [Configuration](#configuration) |
+| Card doesn't update when the sensor changes | Live updates only trigger when the sensor's *state* actually changes in `hass.states`, and are debounced (2s, capped at 10s) — a very fast-updating sensor may take a few seconds to reflect |
+| Date picker doesn't open when clicking the date label | Falls back to a native `<input type="date">` click if the browser doesn't support `showPicker()` — try a different browser if it stays unresponsive |
 
 ## Changelog
 
