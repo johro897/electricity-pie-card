@@ -409,7 +409,12 @@ class ElectricityPieCard extends HTMLElement {
 
   // ─── SVG pie ───────────────────────────────────────────────────────────────
 
-  _buildPie(values, colors) {
+  /** Exact-value tooltip text for period `i` — surfaced as an SVG <title> (native hover tooltip). */
+  _sliceTooltip(labels, values, i) {
+    return this._esc(`${labels[i]}: ${values[i].toFixed(2)} kWh`);
+  }
+
+  _buildPie(values, colors, labels) {
     const total = values.reduce((a, b) => a + b, 0);
     const r = 52, ri = 34, cx = 60, cy = 60;
     const strokeW = r - ri;
@@ -425,7 +430,7 @@ class ElectricityPieCard extends HTMLElement {
     if (activeCount === 1) {
       const i = values.findIndex(v => v > 0);
       return `<circle cx="${cx}" cy="${cy}" r="${rMid}" fill="none"
-        stroke="${this._safeColor(colors[i])}" stroke-width="${strokeW}" class="slice" data-index="${i}"/>`;
+        stroke="${this._safeColor(colors[i])}" stroke-width="${strokeW}" class="slice" data-index="${i}"><title>${this._sliceTooltip(labels, values, i)}</title></circle>`;
     }
 
     // A fixed 0.045rad gap looks right for the usual handful of periods, but with an
@@ -445,7 +450,7 @@ class ElectricityPieCard extends HTMLElement {
       const lg  = slice > Math.PI ? 1 : 0;
       const d   = `M${xi1} ${yi1} L${x1} ${y1} A${r} ${r} 0 ${lg} 1 ${x2} ${y2} L${xi2} ${yi2} A${ri} ${ri} 0 ${lg} 0 ${xi1} ${yi1}Z`;
       angle += slice + gap;
-      return `<path d="${d}" fill="${this._safeColor(colors[i])}" class="slice" data-index="${i}"/>`;
+      return `<path d="${d}" fill="${this._safeColor(colors[i])}" class="slice" data-index="${i}"><title>${this._sliceTooltip(labels, values, i)}</title></path>`;
     }).join("");
   }
 
@@ -543,7 +548,7 @@ class ElectricityPieCard extends HTMLElement {
     const dateStr     = this._selectedDate || this._localDateStr();
     const displayDate = this._displayDate(dateStr);
     const isToday     = dateStr === this._localDateStr();
-    const pieHTML     = this._buildPie(values, colors);
+    const pieHTML     = this._buildPie(values, colors, labels);
 
     const legendRows = labels.map((l, i) => `
       <div class="leg-row">

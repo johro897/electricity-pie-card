@@ -10,6 +10,7 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 ## Features
 
 - Donut pie chart split into periods: **00–08**, **08–16**, **16–24** by default, or any custom time-of-day windows you configure
+- Hover any slice to see its exact period and kWh value
 - Fetches data directly from the HA History API (no ApexCharts, no external dependencies)
 - Two modes:
   - **Interactive** — date navigation with arrows and a date picker
@@ -146,6 +147,9 @@ recorder:
 - The three time-of-day periods were previously hardcoded to fixed 8-hour windows (00–08 / 08–16 / 16–24). A new `periods` config option lets you define any number of custom boundaries, e.g. to match your utility's actual tariff windows
 - `colors` now matches `periods` by index; any period without an explicit color falls back to a built-in palette
 - No config change needed for existing dashboards — omitting `periods` keeps the original three 8-hour windows, verified to produce identical results to before
+
+**Hover tooltip with exact slice value** — [#5](https://github.com/johro897/electricity-pie-card/issues/5)
+- Hovering a pie slice (or the full ring in single-period days) now shows its exact period and kWh value as a native tooltip, instead of only dimming on hover with no way to read the precise number without cross-referencing the legend
 
 ### v1.5
 **Fix: production during the first period could silently disappear** — [#9](https://github.com/johro897/electricity-pie-card/issues/9)
