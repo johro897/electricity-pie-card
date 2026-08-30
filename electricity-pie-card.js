@@ -1,6 +1,6 @@
 /**
- * electricity-pie-card  v1.4
- * Pie chart for electricity consumption per 8h period.
+ * electricity-pie-card
+ * Pie chart for electricity consumption split into time-of-day periods.
  * Fetches history directly via the HA History API — no ApexCharts.
  * UI language auto-detects from Home Assistant's configured language.
  * Supported: en (default), sv, fr, de.
@@ -13,7 +13,14 @@
  *                                  # NOTE: limited by HA's recorder purge_keep_days (default 10 days)
  *   offset: 0                      # optional: 0=today, -1=yesterday, -2=day before yesterday, etc.
  *                                  # If offset is set, the date picker is NOT shown (static card)
- *   colors:                        # optional
+ *   periods:                       # optional, default: three 8h windows (00-08 / 08-16 / 16-24)
+ *     - start: "00:00"
+ *       end: "08:00"
+ *     - start: "08:00"
+ *       end: "16:00"
+ *     - start: "16:00"
+ *       end: "24:00"
+ *   colors:                        # optional, matched to `periods` by index
  *     - "#5B8AF5"
  *     - "#F5A623"
  *     - "#7ED321"
@@ -26,6 +33,19 @@
  */
 
 const DEFAULT_LANG = "en";
+
+// Default period boundaries — three fixed 8h windows, used when `periods` isn't configured.
+const DEFAULT_PERIODS = [
+  { start: "00:00", end: "08:00" },
+  { start: "08:00", end: "16:00" },
+  { start: "16:00", end: "24:00" },
+];
+
+// Default color palette, applied by index to any period without an explicit `colors` entry.
+// The first three match the pre-1.6 hardcoded defaults exactly.
+const DEFAULT_COLORS = [
+  "#5B8AF5", "#F5A623", "#7ED321", "#BD10E0", "#F8523F", "#00BCD4", "#9C6ADE", "#8D6E63",
+];
 
 // Every UI string the card renders, keyed by BCP-47 primary language subtag.
 // Not user-extensible via config — add a new block here to add a language.
@@ -43,6 +63,12 @@ const TRANSLATIONS = {
     error: "Could not fetch history. Check the entity ID and that HA's recorder is active.",
     purge_warning: "No history — check recorder purge_keep_days",
     total_label: "Total {period}",
+    editor_entity: "Entity",
+    editor_title: "Title",
+    editor_unit: "Unit",
+    editor_offset: "Day offset",
+    editor_max_days_back: "Max days back",
+    editor_advanced_note: "Custom period boundaries and colors aren't editable here yet — switch to the YAML editor (⋮ menu) to configure periods and colors.",
   },
   sv: {
     title_default: "Elförbrukning",
@@ -57,6 +83,12 @@ const TRANSLATIONS = {
     error: "Kunde inte hämta historik. Kontrollera entity-id och att HA:s recorder är aktivt.",
     purge_warning: "Ingen historik – kontrollera recorder purge_keep_days",
     total_label: "Totalt {period}",
+    editor_entity: "Entity",
+    editor_title: "Titel",
+    editor_unit: "Enhet",
+    editor_offset: "Dagförskjutning",
+    editor_max_days_back: "Max dagar bakåt",
+    editor_advanced_note: "Anpassade periodgränser och färger går inte att redigera här ännu — växla till YAML-redigeraren (⋮-menyn) för att konfigurera periods och colors.",
   },
   fr: {
     title_default: "Consommation électrique",
@@ -71,6 +103,12 @@ const TRANSLATIONS = {
     error: "Impossible de récupérer l'historique. Vérifiez l'entity_id et que le recorder de HA est actif.",
     purge_warning: "Aucun historique — vérifiez recorder purge_keep_days",
     total_label: "Total {period}",
+    editor_entity: "Entité",
+    editor_title: "Titre",
+    editor_unit: "Unité",
+    editor_offset: "Décalage de jour",
+    editor_max_days_back: "Jours max en arrière",
+    editor_advanced_note: "Les limites de période et les couleurs personnalisées ne sont pas encore modifiables ici — passez à l'éditeur YAML (menu ⋮) pour configurer periods et colors.",
   },
   de: {
     title_default: "Stromverbrauch",
@@ -85,8 +123,34 @@ const TRANSLATIONS = {
     error: "Verlauf konnte nicht geladen werden. Prüfen Sie die Entity-ID und ob der Recorder von HA aktiv ist.",
     purge_warning: "Kein Verlauf – prüfen Sie recorder purge_keep_days",
     total_label: "Gesamt {period}",
+    editor_entity: "Entität",
+    editor_title: "Titel",
+    editor_unit: "Einheit",
+    editor_offset: "Tagesversatz",
+    editor_max_days_back: "Max. Tage zurück",
+    editor_advanced_note: "Benutzerdefinierte Periodengrenzen und Farben können hier noch nicht bearbeitet werden — wechseln Sie zum YAML-Editor (⋮-Menü), um periods und colors zu konfigurieren.",
   },
 };
+
+// ─── Shared translation helpers (module-level: this file defines both the
+// card and its config-editor as separate custom elements) ─────────────────
+
+/** Resolves the HA-configured language to one of our translated languages, falling back to English. */
+function lang(hass) {
+  const raw = (hass?.locale?.language || hass?.language || DEFAULT_LANG).toLowerCase();
+  const primary = raw.split("-")[0];
+  return TRANSLATIONS[primary] ? primary : DEFAULT_LANG;
+}
+
+/** Looks up a UI string in the current language, with {placeholder} substitution. */
+function t(hass, key, replacements) {
+  const dict = TRANSLATIONS[lang(hass)] || TRANSLATIONS[DEFAULT_LANG];
+  const raw = dict[key] ?? TRANSLATIONS[DEFAULT_LANG][key] ?? key;
+  if (!replacements) return raw;
+  return raw.replace(/\{([^}]+)\}/g, (match, k) =>
+    Object.prototype.hasOwnProperty.call(replacements, k) ? replacements[k] : match
+  );
+}
 
 class ElectricityPieCard extends HTMLElement {
   constructor() {
@@ -118,7 +182,9 @@ class ElectricityPieCard extends HTMLElement {
       entity:        config.entity,
       title:         config.title || null,
       max_days_back: config.max_days_back ?? 30,
+      periods:       this._parsePeriods(config.periods),
       colors:        config.colors || ["#5B8AF5", "#F5A623", "#7ED321"],
+      unit:          config.unit || "kWh",
       offset:        config.offset !== undefined ? parseInt(config.offset, 10) : null,
     };
     if (this._config.offset !== null) {
@@ -200,19 +266,12 @@ class ElectricityPieCard extends HTMLElement {
 
   /** Resolves the HA-configured language to one of our translated languages, falling back to English. */
   _lang() {
-    const raw = (this._hass?.locale?.language || this._hass?.language || DEFAULT_LANG).toLowerCase();
-    const primary = raw.split("-")[0];
-    return TRANSLATIONS[primary] ? primary : DEFAULT_LANG;
+    return lang(this._hass);
   }
 
   /** Looks up a UI string in the current language, with {placeholder} substitution. */
   _t(key, replacements) {
-    const dict = TRANSLATIONS[this._lang()] || TRANSLATIONS[DEFAULT_LANG];
-    const raw = dict[key] ?? TRANSLATIONS[DEFAULT_LANG][key] ?? key;
-    if (!replacements) return raw;
-    return raw.replace(/\{([^}]+)\}/g, (match, k) =>
-      Object.prototype.hasOwnProperty.call(replacements, k) ? replacements[k] : match
-    );
+    return t(this._hass, key, replacements);
   }
 
   _displayDate(dateStr) {
@@ -240,12 +299,53 @@ class ElectricityPieCard extends HTMLElement {
     return this._selectedDate > minDate;
   }
 
+  // ─── Period config ──────────────────────────────────────────────────────────
+
+  /**
+   * Validates and normalizes the `periods` config option. Falls back to
+   * DEFAULT_PERIODS wholesale (not per-entry) if anything doesn't look like
+   * a "HH:MM" boundary — a partially-valid list would silently produce a
+   * confusing pie, so an all-or-nothing fallback is safer than guessing.
+   */
+  _parsePeriods(rawPeriods) {
+    const timeRe = /^([01]?\d|2[0-4]):([0-5]\d)$/;
+    const isValid = Array.isArray(rawPeriods) && rawPeriods.length > 0 &&
+      rawPeriods.every(p => p && timeRe.test(p.start) && timeRe.test(p.end));
+    const source = isValid ? rawPeriods : DEFAULT_PERIODS;
+    return source.map(p => ({ start: p.start, end: p.end, label: this._periodLabel(p.start, p.end) }));
+  }
+
+  /** "00:00"/"08:00" -> "00–08"; keeps minutes only when they're non-zero, e.g. "06:30–14:30". */
+  _periodLabel(start, end) {
+    const fmt = (t) => {
+      const [h, m] = t.split(":");
+      return m === "00" ? String(parseInt(h, 10)).padStart(2, "0") : `${parseInt(h, 10)}:${m}`;
+    };
+    return `${fmt(start)}–${fmt(end)}`;
+  }
+
+  /** Resolves period `i`'s color: explicit `colors[i]` config, else the default palette by index. */
+  _colorFor(i) {
+    return this._config.colors[i] ?? DEFAULT_COLORS[i % DEFAULT_COLORS.length];
+  }
+
+  /** Converts the configured "HH:MM" period boundaries into ms timestamps for a given day. */
+  _periodBoundaries(dateStr) {
+    const dayStartMs = new Date(dateStr + "T00:00:00").getTime();
+    const toMs = (t) => {
+      const [h, m] = t.split(":").map(Number);
+      return dayStartMs + (h * 60 + m) * 60000;
+    };
+    return this._config.periods.map(p => ({ start: toMs(p.start), end: toMs(p.end) }));
+  }
+
   // ─── History API ───────────────────────────────────────────────────────────
 
   async _fetchPeriodValues(dateStr) {
     if (this._cache[dateStr]) return this._cache[dateStr];
 
     const entity = this._config.entity;
+    const periodCount = this._config.periods.length;
 
     // Local time without Z — HA interprets this correctly regardless of daylight saving
     const dayStart  = new Date(dateStr + "T00:00:00");
@@ -261,7 +361,7 @@ class ElectricityPieCard extends HTMLElement {
 
     // Empty response → likely purged by recorder purge_keep_days
     if (history.length < 2) {
-      return { values: [0, 0, 0], purged: true };
+      return { values: new Array(periodCount).fill(0), purged: true };
     }
 
     const points = history
@@ -272,13 +372,9 @@ class ElectricityPieCard extends HTMLElement {
       .filter(p => !isNaN(p.v))
       .sort((a, b) => a.t - b.t);
 
-    if (points.length < 2) return { values: [0, 0, 0], purged: true };
+    if (points.length < 2) return { values: new Array(periodCount).fill(0), purged: true };
 
-    const periods = [
-      { start: new Date(dateStr + "T00:00:00").getTime(), end: new Date(dateStr + "T08:00:00").getTime() },
-      { start: new Date(dateStr + "T08:00:00").getTime(), end: new Date(dateStr + "T16:00:00").getTime() },
-      { start: new Date(dateStr + "T16:00:00").getTime(), end: new Date(dateStr + "T23:59:59").getTime() },
-    ];
+    const periods = this._periodBoundaries(dateStr);
 
     // Reset-aware accumulation instead of a naive start/end diff per period.
     // A meter that stops reporting overnight (e.g. a solar inverter with no
@@ -289,8 +385,8 @@ class ElectricityPieCard extends HTMLElement {
     // only summing *increases* treats any drop as a meter reset rather than
     // negative production, and attributes each real increase to whichever
     // period it actually happened in.
-    const dayStartMs = periods[0].start;
-    const rawTotals = [0, 0, 0];
+    const dayStartMs = dayStart.getTime();
+    const rawTotals = new Array(periodCount).fill(0);
     for (let i = 1; i < points.length; i++) {
       const prev = points[i - 1];
       const curr = points[i];
@@ -325,7 +421,7 @@ class ElectricityPieCard extends HTMLElement {
     } catch (e) {
       console.error("electricity-pie-card: error fetching history", e);
       this._loading = false;
-      this._render([0, 0, 0], true, false);
+      this._render(new Array(this._config.periods.length).fill(0), true, false);
     }
   }
 
@@ -351,7 +447,12 @@ class ElectricityPieCard extends HTMLElement {
 
   // ─── SVG pie ───────────────────────────────────────────────────────────────
 
-  _buildPie(values, colors) {
+  /** Exact-value tooltip text for period `i` — surfaced as an SVG <title> (native hover tooltip). */
+  _sliceTooltip(labels, values, i) {
+    return this._esc(`${labels[i]}: ${values[i].toFixed(2)} ${this._config.unit}`);
+  }
+
+  _buildPie(values, colors, labels) {
     const total = values.reduce((a, b) => a + b, 0);
     const r = 52, ri = 34, cx = 60, cy = 60;
     const strokeW = r - ri;
@@ -367,10 +468,13 @@ class ElectricityPieCard extends HTMLElement {
     if (activeCount === 1) {
       const i = values.findIndex(v => v > 0);
       return `<circle cx="${cx}" cy="${cy}" r="${rMid}" fill="none"
-        stroke="${this._safeColor(colors[i])}" stroke-width="${strokeW}" class="slice" data-index="${i}"/>`;
+        stroke="${this._safeColor(colors[i])}" stroke-width="${strokeW}" class="slice" data-index="${i}"><title>${this._sliceTooltip(labels, values, i)}</title></circle>`;
     }
 
-    const gap = 0.045;
+    // A fixed 0.045rad gap looks right for the usual handful of periods, but with an
+    // unusually large custom `periods` config the gaps alone would eat most of the ring —
+    // cap the *total* gap budget so this only ever kicks in well beyond realistic configs.
+    const gap = Math.min(0.045, 0.6 / values.length);
     let angle = -Math.PI / 2;
     return values.map((v, i) => {
       if (v <= 0) return "";
@@ -384,7 +488,7 @@ class ElectricityPieCard extends HTMLElement {
       const lg  = slice > Math.PI ? 1 : 0;
       const d   = `M${xi1} ${yi1} L${x1} ${y1} A${r} ${r} 0 ${lg} 1 ${x2} ${y2} L${xi2} ${yi2} A${ri} ${ri} 0 ${lg} 0 ${xi1} ${yi1}Z`;
       angle += slice + gap;
-      return `<path d="${d}" fill="${this._safeColor(colors[i])}" class="slice" data-index="${i}"/>`;
+      return `<path d="${d}" fill="${this._safeColor(colors[i])}" class="slice" data-index="${i}"><title>${this._sliceTooltip(labels, values, i)}</title></path>`;
     }).join("");
   }
 
@@ -469,24 +573,25 @@ class ElectricityPieCard extends HTMLElement {
     `;
   }
 
-  _render(values = [0, 0, 0], error = false, purged = false) {
+  _render(values = null, error = false, purged = false) {
     const cfg = this._config;
     if (!cfg) return;
     this._ensureShell();
 
-    const colors      = cfg.colors;
-    const labels      = ["00–08", "08–16", "16–24"];
+    if (!values) values = new Array(cfg.periods.length).fill(0);
+    const colors      = cfg.periods.map((_, i) => this._colorFor(i));
+    const labels      = cfg.periods.map(p => p.label);
     const total       = values.reduce((a, b) => a + b, 0);
     const pct         = (i) => total > 0 ? Math.round(values[i] / total * 100) : 0;
     const dateStr     = this._selectedDate || this._localDateStr();
     const displayDate = this._displayDate(dateStr);
     const isToday     = dateStr === this._localDateStr();
-    const pieHTML     = this._buildPie(values, colors);
+    const pieHTML     = this._buildPie(values, colors, labels);
 
     const legendRows = labels.map((l, i) => `
       <div class="leg-row">
-        <span class="dot" style="background:${colors[i]}"></span>
-        <span class="leg-label">${l}</span>
+        <span class="dot" style="background:${this._safeColor(colors[i])}"></span>
+        <span class="leg-label">${this._esc(l)}</span>
         <span class="leg-val">${this._loading ? "…" : values[i].toFixed(2)}</span>
         <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
       </div>`).join("");
@@ -524,14 +629,14 @@ class ElectricityPieCard extends HTMLElement {
               <svg class="pie" width="120" height="120" viewBox="0 0 120 120">${pieHTML}</svg>
               <div class="center">
                 <div class="center-kwh">${total.toFixed(2)}</div>
-                <div class="center-sub">kWh</div>
+                <div class="center-sub">${this._esc(cfg.unit)}</div>
               </div>
             </div>
             <div class="legend">${legendRows}</div>
           </div>
           <div class="total-row">
             <span class="total-lbl">${this._t("total_label", { period: periodStr })}</span>
-            <span class="total-val">${total.toFixed(2)} kWh</span>
+            <span class="total-val">${total.toFixed(2)} ${this._esc(cfg.unit)}</span>
           </div>
           ${purged ? `<div class="purge-warning">⚠ ${this._t("purge_warning")}</div>` : ""}
         `}
@@ -565,12 +670,77 @@ class ElectricityPieCard extends HTMLElement {
   }
 
   getCardSize() { return 3; }
+
+  // ─── Visual editor ──────────────────────────────────────────────────────────
+
+  static getConfigElement() {
+    return document.createElement("electricity-pie-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const entity = Object.keys(hass.states).find((e) => e.startsWith("sensor.")) || "";
+    return { entity };
+  }
+}
+
+// Fields covered by the visual editor. `periods` and `colors` aren't included —
+// ha-form has no built-in selector for a variable-length list of {start, end}
+// objects, and `colors` is index-matched to `periods` so it can't be edited in
+// isolation either. Both remain YAML-only (see editor_advanced_note); ha-form
+// preserves them untouched in the emitted config since it spreads the existing
+// `data` object rather than only emitting schema-declared fields.
+const EDITOR_SCHEMA = [
+  { name: "entity", required: true, selector: { entity: { domain: "sensor" } } },
+  { name: "title", selector: { text: {} } },
+  { name: "unit", selector: { text: {} } },
+  { name: "offset", selector: { number: { mode: "box" } } },
+  { name: "max_days_back", selector: { number: { mode: "box", min: 1 } } },
+];
+
+class ElectricityPieCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config;
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.addEventListener("value-changed", (ev) => {
+        ev.stopPropagation();
+        this.dispatchEvent(new CustomEvent("config-changed", {
+          detail: { config: ev.detail.value },
+          bubbles: true,
+          composed: true,
+        }));
+      });
+      this.appendChild(this._form);
+
+      this._note = document.createElement("div");
+      this._note.style.cssText = "font-size:12px;color:var(--secondary-text-color);margin-top:8px;";
+      this.appendChild(this._note);
+    }
+
+    this._form.hass = this._hass;
+    this._form.data = this._config;
+    this._form.schema = EDITOR_SCHEMA;
+    this._form.computeLabel = (schema) => t(this._hass, `editor_${schema.name}`);
+    this._note.textContent = t(this._hass, "editor_advanced_note");
+  }
 }
 
 customElements.define("electricity-pie-card", ElectricityPieCard);
+customElements.define("electricity-pie-card-editor", ElectricityPieCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "electricity-pie-card",
   name: "Electricity Pie Card",
-  description: "Electricity consumption per 8h period with history",
+  description: "Electricity consumption by time-of-day period, with history",
 });

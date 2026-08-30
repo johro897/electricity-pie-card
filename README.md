@@ -1,6 +1,6 @@
 # Electricity Pie Card for Home Assistant
 
-A lightweight, custom Home Assistant card that visualizes your electricity consumption across different times of the day using a sleek pie chart. The card breaks the day down into three logical 8-hour periods: **Night (00:00–08:00)**, **Day (08:00–16:00)**, and **Evening (16:00–24:00)**.
+A lightweight, custom Home Assistant card that visualizes your electricity consumption across different times of the day using a sleek pie chart. By default the day is split into three periods — **Night (00:00–08:00)**, **Day (08:00–16:00)**, and **Evening (16:00–24:00)** — but the boundaries are fully configurable, e.g. to match your utility's own tariff windows.
 
 Unlike many other custom cards, this card requires no external dependencies (like ApexCharts). Instead, it renders everything using efficient, native SVG graphics and fetches history data directly through the Home Assistant History API.
 
@@ -9,7 +9,8 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 
 ## Features
 
-- Donut pie chart split into periods: **00–08**, **08–16**, **16–24**
+- Donut pie chart split into periods: **00–08**, **08–16**, **16–24** by default, or any custom time-of-day windows you configure
+- Hover any slice to see its exact period and value
 - Fetches data directly from the HA History API (no ApexCharts, no external dependencies)
 - Two modes:
   - **Interactive** — date navigation with arrows and a date picker
@@ -18,9 +19,12 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 - Correct timezone handling — uses local time in all API calls
 - Warning displayed if data is missing due to recorder `purge_keep_days`
 - Single-segment pie renders correctly as a full ring
-- Configurable colors, title, and max days back
+- Configurable unit, colors, title, period boundaries, and max days back
+- Visual (GUI) editor for the core options — no YAML required to get started
 - UI auto-translates to your Home Assistant language — English, Swedish, French, or German (falls back to English)
 - Registers with `window.customCards` for the HA card picker
+
+![Hovering a slice shows its exact period and value](screenshots/hover.png)
 
 ---
 
@@ -45,15 +49,21 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 
 ## Configuration
 
+Use the visual editor (**Edit dashboard → Add card → Electricity Pie Card**, or ⋮ → Edit on an existing card) to set `entity`, `title`, `unit`, `offset`, and `max_days_back` without writing YAML. `periods` and `colors` aren't covered by the visual editor yet — switch to the YAML editor (⋮ menu in the card editor) to set those; the visual editor won't touch or remove them.
+
+![Visual config editor](screenshots/editor.png)
+
 ### Options
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `entity` | string | **required** | The accumulating energy meter sensor (see note below) |
+| `entity` | string | **required** | The accumulating meter sensor — electricity by default, or any other accumulating meter via `unit` (see note below) |
 | `title` | string | *(none — auto-translated, e.g. "Electricity consumption" / "Elförbrukning")* | Card title |
 | `offset` | integer | *(not set)* | Days relative to today: `0` = today, `-1` = yesterday, `-2` = two days ago. When set, the card is **static** (no date navigation shown) |
 | `max_days_back` | integer | `30` | How many days back the date picker allows. Ignored when `offset` is set. See note on recorder below. |
-| `colors` | list | `["#5B8AF5","#F5A623","#7ED321"]` | Colors for the three periods |
+| `periods` | list | three 8h windows: `00:00–08:00`, `08:00–16:00`, `16:00–24:00` | Custom time-of-day boundaries, e.g. to match your utility's tariff windows. Each entry is `{start: "HH:MM", end: "HH:MM"}`; `end: "24:00"` means midnight. Invalid or empty config falls back to the default three periods. See example below. |
+| `colors` | list | `["#5B8AF5","#F5A623","#7ED321"]` | Colors matched to `periods` by index. Any period without an explicit color falls back to a built-in palette. |
+| `unit` | string | `"kWh"` | Unit label shown in the center total, the total row, and slice tooltips. Set this if `entity` is a non-electricity accumulating meter, e.g. `"m³"` for water/gas. |
 
 > **Note on `max_days_back`:** This is limited by Home Assistant's recorder `purge_keep_days` setting (default: **10 days**). If you navigate to a date outside the recorder window, the card will show a warning. To increase history retention, set `purge_keep_days` in your recorder config.
 
@@ -97,11 +107,57 @@ colors:
   - "#81C784"
 ```
 
+**Custom periods — matching a utility's tariff windows:**
+```yaml
+type: custom:electricity-pie-card
+entity: sensor.dsmr_reading_electricity_delivered_1
+title: Consumption by tariff
+periods:
+  - start: "00:00"
+    end: "06:00"
+  - start: "06:00"
+    end: "22:00"
+  - start: "22:00"
+    end: "24:00"
+colors:
+  - "#5B8AF5"
+  - "#F5A623"
+  - "#5B8AF5"
+```
+
+![Custom tariff periods](screenshots/tariffs.png)
+
+**More than 3 periods — automatic fallback colors:**
+```yaml
+type: custom:electricity-pie-card
+entity: sensor.dsmr_reading_electricity_delivered_1
+periods:
+  - start: "00:00"
+    end: "04:00"
+  - start: "04:00"
+    end: "18:00"
+  - start: "18:00"
+    end: "20:00"
+  - start: "20:00"
+    end: "24:00"
+```
+No `colors` needed — any period past the third automatically gets a color from the built-in fallback palette.
+
+![Four periods with fallback colors](screenshots/multiple_times.png)
+
+**Non-electricity meter — water consumption in m³:**
+```yaml
+type: custom:electricity-pie-card
+entity: sensor.water_meter_daily
+title: Water usage
+unit: "m³"
+```
+
 ---
 
 ## How it works
 
-The card calls HA's built-in `/api/history/period/` endpoint directly. It fetches raw state values for the sensor and sums up the increases between consecutive readings within each 8-hour period, locally in JavaScript — any drop between readings is treated as a meter reset (e.g. a "today" counter zeroing overnight) rather than negative production, so a reset landing inside a period doesn't erase real production from the total.
+The card calls HA's built-in `/api/history/period/` endpoint directly. It fetches raw state values for the sensor and sums up the increases between consecutive readings within each configured period, locally in JavaScript — any drop between readings is treated as a meter reset (e.g. a "today" counter zeroing overnight) rather than negative production, so a reset landing inside a period doesn't erase real production from the total.
 
 All API calls use **local time** (no UTC offset issues). Historical days are cached in memory for the session. Today's data is never cached and re-fetches whenever the sensor state changes.
 
@@ -121,6 +177,22 @@ recorder:
 ---
 
 ## Changelog
+
+### v1.6.0
+**Configurable period boundaries** — [#6](https://github.com/johro897/electricity-pie-card/issues/6)
+- The three time-of-day periods were previously hardcoded to fixed 8-hour windows (00–08 / 08–16 / 16–24). A new `periods` config option lets you define any number of custom boundaries, e.g. to match your utility's actual tariff windows
+- `colors` now matches `periods` by index; any period without an explicit color falls back to a built-in palette
+- No config change needed for existing dashboards — omitting `periods` keeps the original three 8-hour windows, verified to produce identical results to before
+
+**Hover tooltip with exact slice value** — [#5](https://github.com/johro897/electricity-pie-card/issues/5)
+- Hovering a pie slice (or the full ring in single-period days) now shows its exact period and value as a native tooltip, instead of only dimming on hover with no way to read the precise number without cross-referencing the legend
+
+**Configurable unit** — [#4](https://github.com/johro897/electricity-pie-card/issues/4)
+- The `kWh` label was hardcoded even though the card already worked with any accumulating meter (e.g. a water or gas sensor). A new `unit` config option (default `"kWh"`) makes that support real — it's now shown in the center total, the total row, and slice tooltips
+
+**Visual (GUI) config editor** — [#11](https://github.com/johro897/electricity-pie-card/issues/11)
+- The card was previously YAML-only. It now has a visual editor covering `entity`, `title`, `unit`, `offset`, and `max_days_back` — add or edit the card entirely through the dashboard UI for these
+- `periods` and `colors` aren't covered by the visual editor yet (no built-in `ha-form` selector for a variable-length list of time-boundary objects) — set those via the YAML editor; the visual editor leaves them untouched
 
 ### v1.5
 **Fix: production during the first period could silently disappear** — [#9](https://github.com/johro897/electricity-pie-card/issues/9)
