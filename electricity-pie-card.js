@@ -1,6 +1,6 @@
 /**
  * electricity-pie-card  v1.4
- * Pie chart for electricity consumption per 8h period.
+ * Pie chart for electricity consumption split into time-of-day periods.
  * Fetches history directly via the HA History API — no ApexCharts.
  * UI language auto-detects from Home Assistant's configured language.
  * Supported: en (default), sv, fr, de.
@@ -13,7 +13,14 @@
  *                                  # NOTE: limited by HA's recorder purge_keep_days (default 10 days)
  *   offset: 0                      # optional: 0=today, -1=yesterday, -2=day before yesterday, etc.
  *                                  # If offset is set, the date picker is NOT shown (static card)
- *   colors:                        # optional
+ *   periods:                       # optional, default: three 8h windows (00-08 / 08-16 / 16-24)
+ *     - start: "00:00"
+ *       end: "08:00"
+ *     - start: "08:00"
+ *       end: "16:00"
+ *     - start: "16:00"
+ *       end: "24:00"
+ *   colors:                        # optional, matched to `periods` by index
  *     - "#5B8AF5"
  *     - "#F5A623"
  *     - "#7ED321"
@@ -26,6 +33,19 @@
  */
 
 const DEFAULT_LANG = "en";
+
+// Default period boundaries — three fixed 8h windows, used when `periods` isn't configured.
+const DEFAULT_PERIODS = [
+  { start: "00:00", end: "08:00" },
+  { start: "08:00", end: "16:00" },
+  { start: "16:00", end: "24:00" },
+];
+
+// Default color palette, applied by index to any period without an explicit `colors` entry.
+// The first three match the pre-1.6 hardcoded defaults exactly.
+const DEFAULT_COLORS = [
+  "#5B8AF5", "#F5A623", "#7ED321", "#BD10E0", "#F8523F", "#00BCD4", "#9C6ADE", "#8D6E63",
+];
 
 // Every UI string the card renders, keyed by BCP-47 primary language subtag.
 // Not user-extensible via config — add a new block here to add a language.
@@ -118,6 +138,7 @@ class ElectricityPieCard extends HTMLElement {
       entity:        config.entity,
       title:         config.title || null,
       max_days_back: config.max_days_back ?? 30,
+      periods:       this._parsePeriods(config.periods),
       colors:        config.colors || ["#5B8AF5", "#F5A623", "#7ED321"],
       offset:        config.offset !== undefined ? parseInt(config.offset, 10) : null,
     };
@@ -240,12 +261,53 @@ class ElectricityPieCard extends HTMLElement {
     return this._selectedDate > minDate;
   }
 
+  // ─── Period config ──────────────────────────────────────────────────────────
+
+  /**
+   * Validates and normalizes the `periods` config option. Falls back to
+   * DEFAULT_PERIODS wholesale (not per-entry) if anything doesn't look like
+   * a "HH:MM" boundary — a partially-valid list would silently produce a
+   * confusing pie, so an all-or-nothing fallback is safer than guessing.
+   */
+  _parsePeriods(rawPeriods) {
+    const timeRe = /^([01]?\d|2[0-4]):([0-5]\d)$/;
+    const isValid = Array.isArray(rawPeriods) && rawPeriods.length > 0 &&
+      rawPeriods.every(p => p && timeRe.test(p.start) && timeRe.test(p.end));
+    const source = isValid ? rawPeriods : DEFAULT_PERIODS;
+    return source.map(p => ({ start: p.start, end: p.end, label: this._periodLabel(p.start, p.end) }));
+  }
+
+  /** "00:00"/"08:00" -> "00–08"; keeps minutes only when they're non-zero, e.g. "06:30–14:30". */
+  _periodLabel(start, end) {
+    const fmt = (t) => {
+      const [h, m] = t.split(":");
+      return m === "00" ? String(parseInt(h, 10)).padStart(2, "0") : `${parseInt(h, 10)}:${m}`;
+    };
+    return `${fmt(start)}–${fmt(end)}`;
+  }
+
+  /** Resolves period `i`'s color: explicit `colors[i]` config, else the default palette by index. */
+  _colorFor(i) {
+    return this._config.colors[i] ?? DEFAULT_COLORS[i % DEFAULT_COLORS.length];
+  }
+
+  /** Converts the configured "HH:MM" period boundaries into ms timestamps for a given day. */
+  _periodBoundaries(dateStr) {
+    const dayStartMs = new Date(dateStr + "T00:00:00").getTime();
+    const toMs = (t) => {
+      const [h, m] = t.split(":").map(Number);
+      return dayStartMs + (h * 60 + m) * 60000;
+    };
+    return this._config.periods.map(p => ({ start: toMs(p.start), end: toMs(p.end) }));
+  }
+
   // ─── History API ───────────────────────────────────────────────────────────
 
   async _fetchPeriodValues(dateStr) {
     if (this._cache[dateStr]) return this._cache[dateStr];
 
     const entity = this._config.entity;
+    const periodCount = this._config.periods.length;
 
     // Local time without Z — HA interprets this correctly regardless of daylight saving
     const dayStart  = new Date(dateStr + "T00:00:00");
@@ -261,7 +323,7 @@ class ElectricityPieCard extends HTMLElement {
 
     // Empty response → likely purged by recorder purge_keep_days
     if (history.length < 2) {
-      return { values: [0, 0, 0], purged: true };
+      return { values: new Array(periodCount).fill(0), purged: true };
     }
 
     const points = history
@@ -272,13 +334,9 @@ class ElectricityPieCard extends HTMLElement {
       .filter(p => !isNaN(p.v))
       .sort((a, b) => a.t - b.t);
 
-    if (points.length < 2) return { values: [0, 0, 0], purged: true };
+    if (points.length < 2) return { values: new Array(periodCount).fill(0), purged: true };
 
-    const periods = [
-      { start: new Date(dateStr + "T00:00:00").getTime(), end: new Date(dateStr + "T08:00:00").getTime() },
-      { start: new Date(dateStr + "T08:00:00").getTime(), end: new Date(dateStr + "T16:00:00").getTime() },
-      { start: new Date(dateStr + "T16:00:00").getTime(), end: new Date(dateStr + "T23:59:59").getTime() },
-    ];
+    const periods = this._periodBoundaries(dateStr);
 
     // Reset-aware accumulation instead of a naive start/end diff per period.
     // A meter that stops reporting overnight (e.g. a solar inverter with no
@@ -289,8 +347,8 @@ class ElectricityPieCard extends HTMLElement {
     // only summing *increases* treats any drop as a meter reset rather than
     // negative production, and attributes each real increase to whichever
     // period it actually happened in.
-    const dayStartMs = periods[0].start;
-    const rawTotals = [0, 0, 0];
+    const dayStartMs = dayStart.getTime();
+    const rawTotals = new Array(periodCount).fill(0);
     for (let i = 1; i < points.length; i++) {
       const prev = points[i - 1];
       const curr = points[i];
@@ -325,7 +383,7 @@ class ElectricityPieCard extends HTMLElement {
     } catch (e) {
       console.error("electricity-pie-card: error fetching history", e);
       this._loading = false;
-      this._render([0, 0, 0], true, false);
+      this._render(new Array(this._config.periods.length).fill(0), true, false);
     }
   }
 
@@ -370,7 +428,10 @@ class ElectricityPieCard extends HTMLElement {
         stroke="${this._safeColor(colors[i])}" stroke-width="${strokeW}" class="slice" data-index="${i}"/>`;
     }
 
-    const gap = 0.045;
+    // A fixed 0.045rad gap looks right for the usual handful of periods, but with an
+    // unusually large custom `periods` config the gaps alone would eat most of the ring —
+    // cap the *total* gap budget so this only ever kicks in well beyond realistic configs.
+    const gap = Math.min(0.045, 0.6 / values.length);
     let angle = -Math.PI / 2;
     return values.map((v, i) => {
       if (v <= 0) return "";
@@ -469,13 +530,14 @@ class ElectricityPieCard extends HTMLElement {
     `;
   }
 
-  _render(values = [0, 0, 0], error = false, purged = false) {
+  _render(values = null, error = false, purged = false) {
     const cfg = this._config;
     if (!cfg) return;
     this._ensureShell();
 
-    const colors      = cfg.colors;
-    const labels      = ["00–08", "08–16", "16–24"];
+    if (!values) values = new Array(cfg.periods.length).fill(0);
+    const colors      = cfg.periods.map((_, i) => this._colorFor(i));
+    const labels      = cfg.periods.map(p => p.label);
     const total       = values.reduce((a, b) => a + b, 0);
     const pct         = (i) => total > 0 ? Math.round(values[i] / total * 100) : 0;
     const dateStr     = this._selectedDate || this._localDateStr();
@@ -485,8 +547,8 @@ class ElectricityPieCard extends HTMLElement {
 
     const legendRows = labels.map((l, i) => `
       <div class="leg-row">
-        <span class="dot" style="background:${colors[i]}"></span>
-        <span class="leg-label">${l}</span>
+        <span class="dot" style="background:${this._safeColor(colors[i])}"></span>
+        <span class="leg-label">${this._esc(l)}</span>
         <span class="leg-val">${this._loading ? "…" : values[i].toFixed(2)}</span>
         <span class="leg-pct">${this._loading ? "" : pct(i) + "%"}</span>
       </div>`).join("");
@@ -572,5 +634,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "electricity-pie-card",
   name: "Electricity Pie Card",
-  description: "Electricity consumption per 8h period with history",
+  description: "Electricity consumption by time-of-day period, with history",
 });
