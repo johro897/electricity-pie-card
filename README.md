@@ -10,7 +10,7 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 ## Features
 
 - Donut pie chart split into periods: **00–08**, **08–16**, **16–24** by default, or any custom time-of-day windows you configure
-- Hover any slice to see its exact period and kWh value
+- Hover any slice to see its exact period and value
 - Fetches data directly from the HA History API (no ApexCharts, no external dependencies)
 - Two modes:
   - **Interactive** — date navigation with arrows and a date picker
@@ -19,7 +19,8 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 - Correct timezone handling — uses local time in all API calls
 - Warning displayed if data is missing due to recorder `purge_keep_days`
 - Single-segment pie renders correctly as a full ring
-- Configurable colors, title, and max days back
+- Configurable unit, colors, title, period boundaries, and max days back
+- Visual (GUI) editor for the core options — no YAML required to get started
 - UI auto-translates to your Home Assistant language — English, Swedish, French, or German (falls back to English)
 - Registers with `window.customCards` for the HA card picker
 
@@ -45,6 +46,8 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 ---
 
 ## Configuration
+
+Use the visual editor (**Edit dashboard → Add card → Electricity Pie Card**, or ⋮ → Edit on an existing card) to set `entity`, `title`, `unit`, `offset`, and `max_days_back` without writing YAML. `periods` and `colors` aren't covered by the visual editor yet — switch to the YAML editor (⋮ menu in the card editor) to set those; the visual editor won't touch or remove them.
 
 ### Options
 
@@ -162,6 +165,10 @@ recorder:
 
 **Configurable unit** — [#4](https://github.com/johro897/electricity-pie-card/issues/4)
 - The `kWh` label was hardcoded even though the card already worked with any accumulating meter (e.g. a water or gas sensor). A new `unit` config option (default `"kWh"`) makes that support real — it's now shown in the center total, the total row, and slice tooltips
+
+**Visual (GUI) config editor** — [#11](https://github.com/johro897/electricity-pie-card/issues/11)
+- The card was previously YAML-only. It now has a visual editor covering `entity`, `title`, `unit`, `offset`, and `max_days_back` — add or edit the card entirely through the dashboard UI for these
+- `periods` and `colors` aren't covered by the visual editor yet (no built-in `ha-form` selector for a variable-length list of time-boundary objects) — set those via the YAML editor; the visual editor leaves them untouched
 
 ### v1.5
 **Fix: production during the first period could silently disappear** — [#9](https://github.com/johro897/electricity-pie-card/issues/9)

@@ -63,6 +63,12 @@ const TRANSLATIONS = {
     error: "Could not fetch history. Check the entity ID and that HA's recorder is active.",
     purge_warning: "No history — check recorder purge_keep_days",
     total_label: "Total {period}",
+    editor_entity: "Entity",
+    editor_title: "Title",
+    editor_unit: "Unit",
+    editor_offset: "Day offset",
+    editor_max_days_back: "Max days back",
+    editor_advanced_note: "Custom period boundaries and colors aren't editable here yet — switch to the YAML editor (⋮ menu) to configure periods and colors.",
   },
   sv: {
     title_default: "Elförbrukning",
@@ -77,6 +83,12 @@ const TRANSLATIONS = {
     error: "Kunde inte hämta historik. Kontrollera entity-id och att HA:s recorder är aktivt.",
     purge_warning: "Ingen historik – kontrollera recorder purge_keep_days",
     total_label: "Totalt {period}",
+    editor_entity: "Entity",
+    editor_title: "Titel",
+    editor_unit: "Enhet",
+    editor_offset: "Dagförskjutning",
+    editor_max_days_back: "Max dagar bakåt",
+    editor_advanced_note: "Anpassade periodgränser och färger går inte att redigera här ännu — växla till YAML-redigeraren (⋮-menyn) för att konfigurera periods och colors.",
   },
   fr: {
     title_default: "Consommation électrique",
@@ -91,6 +103,12 @@ const TRANSLATIONS = {
     error: "Impossible de récupérer l'historique. Vérifiez l'entity_id et que le recorder de HA est actif.",
     purge_warning: "Aucun historique — vérifiez recorder purge_keep_days",
     total_label: "Total {period}",
+    editor_entity: "Entité",
+    editor_title: "Titre",
+    editor_unit: "Unité",
+    editor_offset: "Décalage de jour",
+    editor_max_days_back: "Jours max en arrière",
+    editor_advanced_note: "Les limites de période et les couleurs personnalisées ne sont pas encore modifiables ici — passez à l'éditeur YAML (menu ⋮) pour configurer periods et colors.",
   },
   de: {
     title_default: "Stromverbrauch",
@@ -105,8 +123,34 @@ const TRANSLATIONS = {
     error: "Verlauf konnte nicht geladen werden. Prüfen Sie die Entity-ID und ob der Recorder von HA aktiv ist.",
     purge_warning: "Kein Verlauf – prüfen Sie recorder purge_keep_days",
     total_label: "Gesamt {period}",
+    editor_entity: "Entität",
+    editor_title: "Titel",
+    editor_unit: "Einheit",
+    editor_offset: "Tagesversatz",
+    editor_max_days_back: "Max. Tage zurück",
+    editor_advanced_note: "Benutzerdefinierte Periodengrenzen und Farben können hier noch nicht bearbeitet werden — wechseln Sie zum YAML-Editor (⋮-Menü), um periods und colors zu konfigurieren.",
   },
 };
+
+// ─── Shared translation helpers (module-level: this file defines both the
+// card and its config-editor as separate custom elements) ─────────────────
+
+/** Resolves the HA-configured language to one of our translated languages, falling back to English. */
+function lang(hass) {
+  const raw = (hass?.locale?.language || hass?.language || DEFAULT_LANG).toLowerCase();
+  const primary = raw.split("-")[0];
+  return TRANSLATIONS[primary] ? primary : DEFAULT_LANG;
+}
+
+/** Looks up a UI string in the current language, with {placeholder} substitution. */
+function t(hass, key, replacements) {
+  const dict = TRANSLATIONS[lang(hass)] || TRANSLATIONS[DEFAULT_LANG];
+  const raw = dict[key] ?? TRANSLATIONS[DEFAULT_LANG][key] ?? key;
+  if (!replacements) return raw;
+  return raw.replace(/\{([^}]+)\}/g, (match, k) =>
+    Object.prototype.hasOwnProperty.call(replacements, k) ? replacements[k] : match
+  );
+}
 
 class ElectricityPieCard extends HTMLElement {
   constructor() {
@@ -222,19 +266,12 @@ class ElectricityPieCard extends HTMLElement {
 
   /** Resolves the HA-configured language to one of our translated languages, falling back to English. */
   _lang() {
-    const raw = (this._hass?.locale?.language || this._hass?.language || DEFAULT_LANG).toLowerCase();
-    const primary = raw.split("-")[0];
-    return TRANSLATIONS[primary] ? primary : DEFAULT_LANG;
+    return lang(this._hass);
   }
 
   /** Looks up a UI string in the current language, with {placeholder} substitution. */
   _t(key, replacements) {
-    const dict = TRANSLATIONS[this._lang()] || TRANSLATIONS[DEFAULT_LANG];
-    const raw = dict[key] ?? TRANSLATIONS[DEFAULT_LANG][key] ?? key;
-    if (!replacements) return raw;
-    return raw.replace(/\{([^}]+)\}/g, (match, k) =>
-      Object.prototype.hasOwnProperty.call(replacements, k) ? replacements[k] : match
-    );
+    return t(this._hass, key, replacements);
   }
 
   _displayDate(dateStr) {
@@ -633,9 +670,74 @@ class ElectricityPieCard extends HTMLElement {
   }
 
   getCardSize() { return 3; }
+
+  // ─── Visual editor ──────────────────────────────────────────────────────────
+
+  static getConfigElement() {
+    return document.createElement("electricity-pie-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const entity = Object.keys(hass.states).find((e) => e.startsWith("sensor.")) || "";
+    return { entity };
+  }
+}
+
+// Fields covered by the visual editor. `periods` and `colors` aren't included —
+// ha-form has no built-in selector for a variable-length list of {start, end}
+// objects, and `colors` is index-matched to `periods` so it can't be edited in
+// isolation either. Both remain YAML-only (see editor_advanced_note); ha-form
+// preserves them untouched in the emitted config since it spreads the existing
+// `data` object rather than only emitting schema-declared fields.
+const EDITOR_SCHEMA = [
+  { name: "entity", required: true, selector: { entity: { domain: "sensor" } } },
+  { name: "title", selector: { text: {} } },
+  { name: "unit", selector: { text: {} } },
+  { name: "offset", selector: { number: { mode: "box" } } },
+  { name: "max_days_back", selector: { number: { mode: "box", min: 1 } } },
+];
+
+class ElectricityPieCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config;
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.addEventListener("value-changed", (ev) => {
+        ev.stopPropagation();
+        this.dispatchEvent(new CustomEvent("config-changed", {
+          detail: { config: ev.detail.value },
+          bubbles: true,
+          composed: true,
+        }));
+      });
+      this.appendChild(this._form);
+
+      this._note = document.createElement("div");
+      this._note.style.cssText = "font-size:12px;color:var(--secondary-text-color);margin-top:8px;";
+      this.appendChild(this._note);
+    }
+
+    this._form.hass = this._hass;
+    this._form.data = this._config;
+    this._form.schema = EDITOR_SCHEMA;
+    this._form.computeLabel = (schema) => t(this._hass, `editor_${schema.name}`);
+    this._note.textContent = t(this._hass, "editor_advanced_note");
+  }
 }
 
 customElements.define("electricity-pie-card", ElectricityPieCard);
+customElements.define("electricity-pie-card-editor", ElectricityPieCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "electricity-pie-card",
