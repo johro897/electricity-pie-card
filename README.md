@@ -1,6 +1,6 @@
 # Electricity Pie Card for Home Assistant
 
-A lightweight, custom Home Assistant card that visualizes your electricity consumption across different times of the day using a sleek pie chart. The card breaks the day down into three logical 8-hour periods: **Night (00:00–08:00)**, **Day (08:00–16:00)**, and **Evening (16:00–24:00)**.
+A lightweight, custom Home Assistant card that visualizes your electricity consumption across different times of the day using a sleek pie chart. By default the day is split into three periods — **Night (00:00–08:00)**, **Day (08:00–16:00)**, and **Evening (16:00–24:00)** — but the boundaries are fully configurable, e.g. to match your utility's own tariff windows.
 
 Unlike many other custom cards, this card requires no external dependencies (like ApexCharts). Instead, it renders everything using efficient, native SVG graphics and fetches history data directly through the Home Assistant History API.
 
@@ -9,7 +9,7 @@ Unlike many other custom cards, this card requires no external dependencies (lik
 
 ## Features
 
-- Donut pie chart split into periods: **00–08**, **08–16**, **16–24**
+- Donut pie chart split into periods: **00–08**, **08–16**, **16–24** by default, or any custom time-of-day windows you configure
 - Fetches data directly from the HA History API (no ApexCharts, no external dependencies)
 - Two modes:
   - **Interactive** — date navigation with arrows and a date picker
@@ -53,7 +53,8 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 | `title` | string | *(none — auto-translated, e.g. "Electricity consumption" / "Elförbrukning")* | Card title |
 | `offset` | integer | *(not set)* | Days relative to today: `0` = today, `-1` = yesterday, `-2` = two days ago. When set, the card is **static** (no date navigation shown) |
 | `max_days_back` | integer | `30` | How many days back the date picker allows. Ignored when `offset` is set. See note on recorder below. |
-| `colors` | list | `["#5B8AF5","#F5A623","#7ED321"]` | Colors for the three periods |
+| `periods` | list | three 8h windows: `00:00–08:00`, `08:00–16:00`, `16:00–24:00` | Custom time-of-day boundaries, e.g. to match your utility's tariff windows. Each entry is `{start: "HH:MM", end: "HH:MM"}`; `end: "24:00"` means midnight. Invalid or empty config falls back to the default three periods. See example below. |
+| `colors` | list | `["#5B8AF5","#F5A623","#7ED321"]` | Colors matched to `periods` by index. Any period without an explicit color falls back to a built-in palette. |
 
 > **Note on `max_days_back`:** This is limited by Home Assistant's recorder `purge_keep_days` setting (default: **10 days**). If you navigate to a date outside the recorder window, the card will show a warning. To increase history retention, set `purge_keep_days` in your recorder config.
 
@@ -97,11 +98,29 @@ colors:
   - "#81C784"
 ```
 
+**Custom periods — matching a utility's tariff windows:**
+```yaml
+type: custom:electricity-pie-card
+entity: sensor.dsmr_reading_electricity_delivered_1
+title: Consumption by tariff
+periods:
+  - start: "00:00"
+    end: "06:00"
+  - start: "06:00"
+    end: "22:00"
+  - start: "22:00"
+    end: "24:00"
+colors:
+  - "#5B8AF5"
+  - "#F5A623"
+  - "#5B8AF5"
+```
+
 ---
 
 ## How it works
 
-The card calls HA's built-in `/api/history/period/` endpoint directly. It fetches raw state values for the sensor and sums up the increases between consecutive readings within each 8-hour period, locally in JavaScript — any drop between readings is treated as a meter reset (e.g. a "today" counter zeroing overnight) rather than negative production, so a reset landing inside a period doesn't erase real production from the total.
+The card calls HA's built-in `/api/history/period/` endpoint directly. It fetches raw state values for the sensor and sums up the increases between consecutive readings within each configured period, locally in JavaScript — any drop between readings is treated as a meter reset (e.g. a "today" counter zeroing overnight) rather than negative production, so a reset landing inside a period doesn't erase real production from the total.
 
 All API calls use **local time** (no UTC offset issues). Historical days are cached in memory for the session. Today's data is never cached and re-fetches whenever the sensor state changes.
 
@@ -121,6 +140,12 @@ recorder:
 ---
 
 ## Changelog
+
+### v1.6 (in progress — heading may be renamed at release, see project CLAUDE.md)
+**Configurable period boundaries** — [#6](https://github.com/johro897/electricity-pie-card/issues/6)
+- The three time-of-day periods were previously hardcoded to fixed 8-hour windows (00–08 / 08–16 / 16–24). A new `periods` config option lets you define any number of custom boundaries, e.g. to match your utility's actual tariff windows
+- `colors` now matches `periods` by index; any period without an explicit color falls back to a built-in palette
+- No config change needed for existing dashboards — omitting `periods` keeps the original three 8-hour windows, verified to produce identical results to before
 
 ### v1.5
 **Fix: production during the first period could silently disappear** — [#9](https://github.com/johro897/electricity-pie-card/issues/9)
